@@ -4,6 +4,7 @@ import numpy as np
 import cv2 as cv
 from glob import glob
 import os
+from scipy.ndimage import gaussian_filter
 
 #CLASSES = []
 
@@ -11,17 +12,14 @@ import os
 
 
 class Human36MBaseDataset(Dataset):
-    def __init__(self, img_dir, subsets, skeleton_2d_dir=None, skeleton_3d_dir=None, transforms=None, img_size=(256,256)):
+    def __init__(self, img_fns, skeleton_2d_dir=None, skeleton_3d_dir=None, transforms=None, img_size=(256,256), downsample=8):
         super().__init__()
-        self.img_dir = img_dir
-        self.img_fns = []
-        for subset in subsets:
-            self.img_fns += glob(os.path.join(img_dir, f'{subset}*.jpg'))
-        np.random.shuffle(self.img_fns)
+        self.img_fns = img_fns
         self.skeleton_2d_dir = skeleton_2d_dir
         self.skeleton_3d_dir = skeleton_3d_dir
         self.transforms = transforms
         self.img_size = img_size
+        self.downsample = downsample
 
     def __len__(self):
         return len(self.img_fns)
@@ -67,9 +65,19 @@ class Human36MBaseDataset(Dataset):
         skeleton_3d[:, 1] *= self.img_size[1] / img_orig_size[1]
         return torch.from_numpy(skeleton_3d)
 
+    def _generate_hmap(self, skeleton_2d):
+        hmap = np.zeros((skeleton_2d.shape[0]+1, self.img_size[0]//self.downsample, self.img_size[1]//self.downsample), dtype=float)
+        for i in range(0, skeleton_2d.shape[0]):
+            hmap[i+1, int(skeleton_2d[i,0])//self.downsample, int(skeleton_2d[i,1])//self.downsample] = 1.0
+            hmap[i+1] = gaussian_filter(hmap[i+1], sigma=3)
+        hmap[hmap > 1] = 1
+        hmap[hmap < 0.0099] = 0
+        hmap[0] = 1.0 - np.max(hmap[1:, :, :], axis=0)
+        return hmap
+
 class Human36M2DPoseDataset(Human36MBaseDataset):
-    def __init__(self, img_dir, subsets, skeleton_2d_dir, transforms=None, img_size=(256,256)):
-        super().__init__(img_dir=img_dir, subsets=subsets, skeleton_2d_dir=skeleton_2d_dir, transforms=transforms, img_size=img_size)
+    def __init__(self, img_fns, skeleton_2d_dir, transforms=None, img_size=(256,256), downsample=8):
+        super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, transforms=transforms, img_size=img_size, downsample=downsample)
 
     def __getitem__(self, index):
         img, subset, action, frame = self._get_img_info(index)
@@ -77,11 +85,12 @@ class Human36M2DPoseDataset(Human36MBaseDataset):
         img_orig_size = (w, h)
         img = self._prepare_img(img)
         skeleton_2d = self._prepare_skeleton_2d(subset, action, frame, img_orig_size)
-        return img, skeleton_2d
+        hmap = self._generate_hmap(skeleton_2d)
+        return img, hmap
 
 class Human36M3DPoseDataset(Human36MBaseDataset):
-    def __init__(self, img_dir, subsets, skeleton_3d_dir, transforms=None, img_size=(256,256)):
-        super().__init__(img_dir=img_dir, subsets=subsets, skeleton_3d_dir=skeleton_3d_dir, transforms=transforms, img_size=img_size)
+    def __init__(self, img_fns, skeleton_3d_dir, transforms=None, img_size=(256,256), downsample=8):
+        super().__init__(img_fns=img_fns, skeleton_3d_dir=skeleton_3d_dir, transforms=transforms, img_size=img_size, downsample=downsample)
 
     def __getitem__(self, index):
         img, subset, action, frame = self._get_img_info(index)
@@ -92,8 +101,8 @@ class Human36M3DPoseDataset(Human36MBaseDataset):
         return img, skeleton_3d
 
 class Human36M2DTo3DDataset(Human36MBaseDataset):
-    def __init__(self, img_dir, subsets, skeleton_2d_dir, skeleton_3d_dir, transforms=None, img_size=(256,256)):
-        super().__init__(img_dir=img_dir, subsets=subsets, skeleton_2d_dir=skeleton_2d_dir, skeleton_3d_dir=skeleton_3d_dir, transforms=transforms, img_size=img_size)
+    def __init__(self, img_fns, skeleton_2d_dir, skeleton_3d_dir, transforms=None, img_size=(256,256), downsample=8):
+        super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, skeleton_3d_dir=skeleton_3d_dir, transforms=transforms, img_size=img_size, downsample=downsample)
 
     def __getitem__(self, index):
         img, subset, action, frame = self._get_img_info(index)
@@ -109,8 +118,9 @@ class Human36M2DTo3DDataset(Human36MBaseDataset):
 # return 2 3D skeletons from the same video sequence with label "1" or from different video sequence with label "0"
 
 if __name__ == '__main__':
-    train_dataset = Human36M2DPoseDataset('/scratch/PI/cqf/datasets/h36m/img', ['S1', 'S5'], '/scratch/PI/cqf/datasets/h36m/pos2d')
-    img, skeleton = train_dataset[0]
+    from glob import glob
+    img_fns = glob('/scratch/PI/cqf/datasets/h36m/img/*.jpg')
+    train_dataset = Human36M2DPoseDataset(img_fns, '/scratch/PI/cqf/datasets/h36m/pos2d')
+    img, hmap = train_dataset[0]
     print(img.shape)
-    print(skeleton.shape)
-    print(skeleton)
+    print(hmap.shape)

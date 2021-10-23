@@ -130,7 +130,7 @@ class Decoder(nn.Module):
                                        BatchNorm(256),
                                        nn.ReLU(),
                                        nn.Dropout(0.1),
-                                       nn.Conv2d(256, num_classes, kernel_size=1, stride=1))
+                                       nn.Conv2d(256, num_classes+1, kernel_size=1, stride=1))
 #                                        nn.Conv2d(256, num_classes+5+1, kernel_size=1, stride=1)) # Use in case of extacting the bounding box
 
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
