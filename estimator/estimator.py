@@ -11,28 +11,16 @@ import tqdm
 import random
 from datetime import datetime
 import time
-from scipy.ndimage import gaussian_filter
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
 from models.openpose import openpose
 from models.unipose import unipose
 from data.human36m import Human36M2DPoseDataset
-from utils.misc import AverageMeter
+from utils.misc import AverageMeter, seed_everything
 
-SEED = 42
+seed_everything(1120)
 
-def seed_everything(seed):
-     random.seed(seed)
-     os.environ['PYTHONHASHSEED'] = str(seed)
-     np.random.seed(seed)
-     torch.manual_seed(seed)
-     torch.cuda.manual_seed(seed)
-     torch.backends.cudnn.deterministic = True
-     torch.backends.cudnn.benchmark = True
-
-seed_everything(SEED)
-
-root_path = '/scratch/PI/cqf/datasets/human36m'
+root_path = '/scratch/PI/cqf/datasets/h36m'
 img_path = root_path + '/img'
 pos2d_path = root_path + '/pos2d'
 
@@ -77,7 +65,7 @@ class Fitter:
         self.scaler = torch.cuda.amp.GradScaler()
         
         self.scheduler = config.SchedulerClass(self.optimizer, **config.scheduler_params)
-        self.criterion = nn.CrossEntropyLoss()#ContrastiveLoss()
+        self.criterion = nn.MSELoss().cuda()#ContrastiveLoss()
         #self.metric = torch.dist#nn.CosineSimilarity()
         self.log(f'Fitter prepared. Device is {self.device}')
         
@@ -224,7 +212,7 @@ class Fitter:
             
 class TrainGlobalConfig:
     num_workers = 2
-    batch_size = 2 # * torch.cuda.device_count()
+    batch_size = 2 * torch.cuda.device_count()
     n_epochs = 5 
     lr = 0.0002
 
@@ -256,7 +244,7 @@ net = unipose(dataset='human3.6m',num_classes=17).cuda()
 
 
 def run_training():
-    device = torch.device('cuda:0')
+    device = torch.device('cuda')
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
