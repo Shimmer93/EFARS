@@ -27,8 +27,8 @@ pos2d_path = root_path + '/pos2d'
 img_fns = glob(img_path+'/*.jpg')
 split = int(0.8*len(img_fns))
 random.shuffle(img_fns)
-train_fns = img_fns[:split]
-val_fns = img_fns[split:]
+train_fns = img_fns[:10000]
+val_fns = img_fns[10000:12000]
 
 # TODO: transforms
 
@@ -112,11 +112,12 @@ class Fitter:
             if self.config.verbose:
                 if step % self.config.verbose_step == 0:
                     print(
-                        f'Train Step {step}/{len(val_loader)}, ' + \
+                        f'Val Step {step}/{len(val_loader)}, ' + \
                         f'mse_loss: {mse_loss.avg:.8f}, ' + \
                         #f'accuracy: {accuracy.avg:.8f}, ' + \
                         f'time: {(time.time() - t):.5f}', end='\r'
                     )
+
             with torch.no_grad():
                 imgs = imgs.cuda().float()
                 hmaps = hmaps.cuda().float()
@@ -126,10 +127,8 @@ class Fitter:
                     preds = self.model(imgs)
                     loss = self.criterion(preds,hmaps)
 
-                mse_loss.update(loss.detach().item(), batch_size)
-
-            if step == 10:
-                break
+            mse_loss.update(loss.detach().item(), batch_size)
+            #self.scaler.scale(loss).backward()
 
         return mse_loss
 
@@ -159,7 +158,7 @@ class Fitter:
             self.scaler.scale(loss).backward()
             # loss = loss / self.iters_to_accumulate # gradient accumulation
             
-            mse_loss.update(loss.detach().item(), batch_size)
+            #mse_loss.update(loss.detach().item(), batch_size)
             
             #self.optimizer.step()
             self.scaler.step(self.optimizer) # native fp16
@@ -168,9 +167,6 @@ class Fitter:
                 self.scheduler.step()
             
             self.scaler.update() #native fp16
-            
-            if step == 10:
-                break
                 
                 
 #             if (step+1) % self.iters_to_accumulate == 0: # gradient accumulation
@@ -211,12 +207,12 @@ class Fitter:
             
             
 class TrainGlobalConfig:
-    num_workers = 2
-    batch_size = 2 * torch.cuda.device_count()
-    n_epochs = 5 
+    num_workers = 8
+    batch_size = 4 * torch.cuda.device_count()
+    n_epochs = 10 
     lr = 0.0002
 
-    folder = 'test'
+    folder = 'test2'
     
 
     # -------------------
@@ -230,7 +226,7 @@ class TrainGlobalConfig:
 
     SchedulerClass = torch.optim.lr_scheduler.OneCycleLR
     scheduler_params = dict(
-        max_lr=1e-4,
+        max_lr=1e-5,
         #total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
         epochs=n_epochs,
         steps_per_epoch=int(len(train_dataset) / batch_size),

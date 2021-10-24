@@ -1,3 +1,4 @@
 playground.ipynb
-./estimator/checkpoints
+estimator/checkpoints/
 *__pycache__/
+data/human36m_camera_parameters.json

@@ -5,6 +5,7 @@ from tqdm import tqdm
 import os
 from scipy.ndimage.filters import gaussian_filter
 import cv2 as cv
+import json
 
 USED_JOINT_MASK = np.array([1,1,1,1,0,0,1,1,
                             1,0,0,0,1,1,1,1,
@@ -45,4 +46,11 @@ def generate_hmap(img_dir, pos2d_dir, output_dir):
         pts = np.load(fn)
         for i, pt in enumerate(pts):
 '''
-    
+def get_camera_parameters(cps_file, subset, id):
+    cps = json.load(cps_file)
+    Rt = cps['extrinsics'][subset][str(id)]
+    R = Rt['R']
+    t = Rt['t']
+    cali = cps['intrinsics'][str(id)]['calibration_matrix']
+
+    return R, t, cali
