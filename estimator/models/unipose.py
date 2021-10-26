@@ -1,3 +1,5 @@
+# Credit: https://github.com/bmartacho/UniPose/blob/master/model/unipose.py
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -332,10 +334,10 @@ def build_backbone(backbone, output_stride, BatchNorm):
     else:
         raise NotImplementedError
 
-class unipose(nn.Module):
+class UniPose(nn.Module):
     def __init__(self, dataset, backbone='resnet', output_stride=16, num_classes=21,
                  sync_bn=True, freeze_bn=False, stride=8):
-        super(unipose, self).__init__()
+        super(UniPose, self).__init__()
         self.stride = stride
 
         BatchNorm = nn.BatchNorm2d
@@ -362,7 +364,10 @@ class unipose(nn.Module):
 #         return x[:,0:self.num_classes+1,:,:], x[:,self.num_classes+1:,:,:] 
     
         # If you are only extracting keypoints
-        return x
+        if self.training:
+            return x
+        else:
+            return x[:,:17,:,:]
 
     def freeze_bn(self):
         for m in self.modules():
@@ -392,7 +397,8 @@ class unipose(nn.Module):
                             yield p
 
 if __name__ == '__main__':
-    m = unipose(dataset='human3.6m',num_classes=17)
+    m = UniPose(dataset='human3.6m',num_classes=17)
+    m.eval()
     x = torch.randn(2,3,256,256)
     y = m(x)
     print(y.shape)

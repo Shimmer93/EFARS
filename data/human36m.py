@@ -20,6 +20,8 @@ class Human36MBaseDataset(Dataset):
         self.transforms = transforms
         self.img_size = img_size
         self.downsample = downsample
+        self.mean = np.array([0.44245931, 0.2762126, 0.2607548])
+        self.std = np.array([0.25389833, 0.26563732, 0.24224165])
 
     def __len__(self):
         return len(self.img_fns)
@@ -36,13 +38,13 @@ class Human36MBaseDataset(Dataset):
         return img, subset, action, frame
         
     def _prepare_img(self, img):
-        if self.img_size != None:
-            img = cv.resize(img, self.img_size, interpolation=cv.INTER_LINEAR)
+        #if self.img_size != None:
+        #    img = cv.resize(img, self.img_size, interpolation=cv.INTER_LINEAR)
         img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
-        img = torch.from_numpy(img.transpose((2, 0, 1)))
-        img = img.float() / 255.0
-        if self.transforms != None:
-            img = self.transforms(img)
+        #img = torch.from_numpy(img.transpose((2, 0, 1)))
+        img = img.astype(np.float32) / 255.0
+        #if self.transforms != None:
+        #    img = self.transforms(img)
         return img
 
     def _prepare_skeleton_2d(self, subset, action, frame, img_orig_size):
@@ -53,7 +55,7 @@ class Human36MBaseDataset(Dataset):
         skeleton_2d[:, 0] *= self.img_size[0] / img_orig_size[0]
         skeleton_2d[:, 1] *= self.img_size[1] / img_orig_size[1]
         
-        return torch.from_numpy(skeleton_2d)
+        return skeleton_2d
 
     # Further processing is needed for 3D skeletons
     def _prepare_skeleton_3d(self, subset, action, frame, img_orig_size):
@@ -63,7 +65,7 @@ class Human36MBaseDataset(Dataset):
         #skeleton_3d = skeleton_3d[USED_JOINT_MASK,:]
         skeleton_3d[:, 0] *= self.img_size[0] / img_orig_size[0]
         skeleton_3d[:, 1] *= self.img_size[1] / img_orig_size[1]
-        return torch.from_numpy(skeleton_3d)
+        return skeleton_3d
 
     def _generate_hmap(self, skeleton_2d):
         hmap = np.zeros((skeleton_2d.shape[0]+1, self.img_size[0]//self.downsample, self.img_size[1]//self.downsample), dtype=float)
@@ -73,7 +75,7 @@ class Human36MBaseDataset(Dataset):
         hmap[hmap > 1] = 1
         hmap[hmap < 0.0099] = 0
         hmap[0] = 1.0 - np.max(hmap[1:, :, :], axis=0)
-        return hmap
+        return torch.from_numpy(hmap)
 
 class Human36M2DPoseDataset(Human36MBaseDataset):
     def __init__(self, img_fns, skeleton_2d_dir, transforms=None, img_size=(256,256), downsample=8):
@@ -85,6 +87,7 @@ class Human36M2DPoseDataset(Human36MBaseDataset):
         img_orig_size = (w, h)
         img = self._prepare_img(img)
         skeleton_2d = self._prepare_skeleton_2d(subset, action, frame, img_orig_size)
+        img, skeleton_2d = self.transforms(img, skeleton_2d, (512, 512), self.img_size, self.mean, self.std)
         hmap = self._generate_hmap(skeleton_2d)
         return img, hmap
 
@@ -97,8 +100,9 @@ class Human36M3DPoseDataset(Human36MBaseDataset):
         w, h, _ = img.shape
         img_orig_size = (w, h)
         img = self._prepare_img(img)
+        img = self.transforms(img)
         skeleton_3d = self._prepare_skeleton_3d(subset, action, frame, img_orig_size)
-        return img, skeleton_3d
+        return img, torch.from_numpy(skeleton_3d)
 
 class Human36M2DTo3DDataset(Human36MBaseDataset):
     def __init__(self, img_fns, skeleton_2d_dir, skeleton_3d_dir, transforms=None, img_size=(256,256), downsample=8):
@@ -110,7 +114,7 @@ class Human36M2DTo3DDataset(Human36MBaseDataset):
         img_orig_size = (w, h)
         skeleton_2d = self._prepare_skeleton_2d(subset, action, frame, img_orig_size)
         skeleton_3d = self._prepare_skeleton_3d(subset, action, frame, img_orig_size)
-        return skeleton_2d, skeleton_3d
+        return torch.from_numpy(skeleton_2d), torch.from_numpy(skeleton_3d)
 
 
 # TODO:
@@ -119,8 +123,11 @@ class Human36M2DTo3DDataset(Human36MBaseDataset):
 
 if __name__ == '__main__':
     from glob import glob
+    import sys
+    sys.path.append('..')
+    from utils.transform import do_pos2d_train_transforms
     img_fns = glob('/scratch/PI/cqf/datasets/h36m/img/*.jpg')
-    train_dataset = Human36M2DPoseDataset(img_fns, '/scratch/PI/cqf/datasets/h36m/pos2d')
+    train_dataset = Human36M2DPoseDataset(img_fns, '/scratch/PI/cqf/datasets/h36m/pos2d', transforms=do_pos2d_train_transforms)
     img, hmap = train_dataset[0]
     print(img.shape)
     print(hmap.shape)

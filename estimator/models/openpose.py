@@ -21,9 +21,9 @@ def make_layers(block, no_relu_layers):
 
     return nn.Sequential(OrderedDict(layers))
 
-class openpose(nn.Module):
+class OpenPose(nn.Module):
     def __init__(self):
-        super(openpose, self).__init__()
+        super(OpenPose, self).__init__()
 
         # these layers have no relu layer
         no_relu_layers = ['conv5_5_CPM_L1', 'conv5_5_CPM_L2', 'Mconv7_stage2_L1',\
@@ -56,7 +56,7 @@ class openpose(nn.Module):
                         ('conv5_2_CPM_L1', [128, 128, 3, 1, 1]),
                         ('conv5_3_CPM_L1', [128, 128, 3, 1, 1]),
                         ('conv5_4_CPM_L1', [128, 512, 1, 1, 0]),
-                        ('conv5_5_CPM_L1', [512, 38, 1, 1, 0])
+                        ('conv5_5_CPM_L1', [512, 34, 1, 1, 0])
                     ])
 
         block1_2 = OrderedDict([
@@ -64,7 +64,7 @@ class openpose(nn.Module):
                         ('conv5_2_CPM_L2', [128, 128, 3, 1, 1]),
                         ('conv5_3_CPM_L2', [128, 128, 3, 1, 1]),
                         ('conv5_4_CPM_L2', [128, 512, 1, 1, 0]),
-                        ('conv5_5_CPM_L2', [512, 19, 1, 1, 0])
+                        ('conv5_5_CPM_L2', [512, 17, 1, 1, 0])
                     ])
         blocks['block1_1'] = block1_1
         blocks['block1_2'] = block1_2
@@ -74,7 +74,7 @@ class openpose(nn.Module):
         # Stages 2 - 6
         for i in range(2, 7):
             blocks['block%d_1' % i] = OrderedDict([
-                    ('Mconv1_stage%d_L1' % i, [185, 128, 7, 1, 3]),
+                    ('Mconv1_stage%d_L1' % i, [179, 128, 7, 1, 3]),
                     ('Mconv2_stage%d_L1' % i, [128, 128, 7, 1, 3]),
                     ('Mconv3_stage%d_L1' % i, [128, 128, 7, 1, 3]),
                     ('Mconv4_stage%d_L1' % i, [128, 128, 7, 1, 3]),
@@ -84,7 +84,7 @@ class openpose(nn.Module):
                 ])
 
             blocks['block%d_2' % i] = OrderedDict([
-                    ('Mconv1_stage%d_L2' % i, [185, 128, 7, 1, 3]),
+                    ('Mconv1_stage%d_L2' % i, [179, 128, 7, 1, 3]),
                     ('Mconv2_stage%d_L2' % i, [128, 128, 7, 1, 3]),
                     ('Mconv3_stage%d_L2' % i, [128, 128, 7, 1, 3]),
                     ('Mconv4_stage%d_L2' % i, [128, 128, 7, 1, 3]),
@@ -139,3 +139,10 @@ class openpose(nn.Module):
         out6_2 = self.model6_2(out6)
 
         return out6_1, out6_2
+
+if __name__ == '__main__':
+    m = OpenPose()
+    x = torch.randn(2,3,256,256)
+    y0, y1 = m(x)
+    print(y0.shape)
+    print(y1.shape)
