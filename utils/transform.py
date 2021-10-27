@@ -1,4 +1,3 @@
-from numpy.ma.core import putmask
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
 import numpy as np
@@ -14,11 +13,10 @@ def denormalize(img, mean, std):
         img[i,:,:] = img[i,:,:] * std[i] + mean[i]
     return img
 
+def get_random_crop_positions_with_pos2d(img, pos2d, crop_size):
+    max_pos = np.max(pos2d, axis=0)
+    min_pos = np.min(pos2d, axis=0)
 
-def do_pos2d_train_transforms(img, pts, crop_size, img_size, mean, std):
-    max_pos = np.max(pts, axis=0)
-    min_pos = np.min(pts, axis=0)
-    print(f'min_pos: {min_pos}, max_pos: {max_pos}')
     if max_pos[0] - min_pos[0] > crop_size[0] or max_pos[1] - min_pos[1] > crop_size[1]:
         x_min = 0
         y_min = 0
@@ -34,28 +32,30 @@ def do_pos2d_train_transforms(img, pts, crop_size, img_size, mean, std):
         x_max = x_min + crop_size[0]
         y_max = y_min + crop_size[1]
 
-    print(f'x_min: {x_min}, y_min: {y_min}, x_max: {x_max}, y_max: {y_max}')
+    return x_min, y_min, x_max, y_max
+
+def do_pos2d_train_transforms(img, pos2d, **kwargs):
+    x_min, y_min, x_max, y_max = get_random_crop_positions_with_pos2d(img, pos2d, kwargs['crop_size'])
     transforms = A.Compose([
-        A.Crop(x_min, y_min, x_max, y_max, p=1),
+        A.Crop(x_min, y_min, x_max, y_max, p=0.5),
         A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2, p=0.9),
         A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.9),
         A.Blur(blur_limit=3,p=0.2),
         A.HorizontalFlip(p=0.5),
-        A.Resize(height=img_size[0], width=img_size[1], p=1),
-        ToTensorV2(p=1)
+        A.Resize(height=kwargs['out_size'][0], width=kwargs['out_size'][1], p=1)
     ], keypoint_params=A.KeypointParams(format='xy'))
 
-    transformed = transforms(image=img, keypoints=pts)
-    img = normalize(transformed['image'], mean, std)
-    pts = torch.tensor(transformed['keypoints'])
-    return img, pts
+    transformed = transforms(image=img, keypoints=pos2d)
+    img = normalize(transformed['image'], kwargs['mean'], kwargs['std'])
+    pos2d = np.array(transformed['keypoints'])
+    return img, pos2d
 
-def do_img_only_transforms(img, mean, std):
+def do_pos2d_val_transforms(img, pos2d, **kwargs):
     transforms = A.Compose([
-        A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.9),
-        A.Blur(blur_limit=3,p=0.2),
-        ToTensorV2(p=1)
-    ])
-    img = transforms(img)['image']
-    img = normalize(img, mean, std)
-    return img
+        A.Resize(height=kwargs['out_size'][0], width=kwargs['out_size'][1], p=1),
+    ], keypoint_params=A.KeypointParams(format='xy'))
+
+    transformed = transforms(image=img, keypoints=pos2d)
+    img = normalize(transformed['image'], kwargs['mean'], kwargs['std'])
+    pos2d = np.array(transformed['keypoints'])
+    return img, pos2d

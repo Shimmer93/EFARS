@@ -12,8 +12,6 @@ USED_JOINT_MASK = np.array([1,1,1,1,0,0,1,1,
                             0,1,1,1,0,0,0,0,
                             0,1,1,1,0,0,0,0],dtype=np.bool8)
 
-CHANNEL_MEAN = []
-
 def pos2d_preprocess(input_dir, output_dir=None):
     if output_dir is None:
         output_dir = input_dir

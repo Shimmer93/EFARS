@@ -1,27 +1,37 @@
 import torch
 from torch.utils.data import Dataset
+from torchvision.transforms import ToTensor
 import numpy as np
 import cv2 as cv
 from glob import glob
 import os
 from scipy.ndimage import gaussian_filter
 
-#CLASSES = []
-
-#CHANNEL_MEAN = []
-
+class Human36MMetadata:
+    classes = {'Directions': 0, 'Discussion': 1, 'Eating': 2, 'Greeting': 3, 'TakingPhoto': 4, 'Photo':4, 
+               'Posing': 5, 'Purchases': 6, 'Smoking': 7, 'Waiting': 8, 'Walking': 9, 'Sitting': 10, 
+               'SittingDown': 10, 'Phoning': 11, 'WalkingDog': 12, 'WalkDog': 12, 'WalkTogether': 13}
+    mean = np.array([0.44245931, 0.2762126, 0.2607548])
+    std = np.array([0.25389833, 0.26563732, 0.24224165])
+    used_joint_mask = np.array([1,1,1,1,0,0,1,1,
+                                1,0,0,0,1,1,1,1,
+                                0,1,1,1,0,0,0,0,
+                                0,1,1,1,0,0,0,0],dtype=np.bool8)
 
 class Human36MBaseDataset(Dataset):
-    def __init__(self, img_fns, skeleton_2d_dir=None, skeleton_3d_dir=None, transforms=None, img_size=(256,256), downsample=8):
+    def __init__(self, img_fns, skeleton_2d_dir=None, skeleton_3d_dir=None, transforms=None, out_size=(256,256), downsample=8):
         super().__init__()
         self.img_fns = img_fns
         self.skeleton_2d_dir = skeleton_2d_dir
         self.skeleton_3d_dir = skeleton_3d_dir
         self.transforms = transforms
-        self.img_size = img_size
+        self.transforms_params = {
+            'out_size': out_size,
+            'mean': Human36MMetadata.mean,
+            'std': Human36MMetadata.std
+        }
+        self.out_size = out_size
         self.downsample = downsample
-        self.mean = np.array([0.44245931, 0.2762126, 0.2607548])
-        self.std = np.array([0.25389833, 0.26563732, 0.24224165])
 
     def __len__(self):
         return len(self.img_fns)
@@ -38,13 +48,11 @@ class Human36MBaseDataset(Dataset):
         return img, subset, action, frame
         
     def _prepare_img(self, img):
-        #if self.img_size != None:
-        #    img = cv.resize(img, self.img_size, interpolation=cv.INTER_LINEAR)
+        #if self.out_size != None:
+        #    img = cv.resize(img, self.out_size, interpolation=cv.INTER_LINEAR)
         img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
         #img = torch.from_numpy(img.transpose((2, 0, 1)))
         img = img.astype(np.float32) / 255.0
-        #if self.transforms != None:
-        #    img = self.transforms(img)
         return img
 
     def _prepare_skeleton_2d(self, subset, action, frame, img_orig_size):
@@ -52,9 +60,8 @@ class Human36MBaseDataset(Dataset):
         skeleton_2ds = np.load(skeleton_2d_fn)
         skeleton_2d = skeleton_2ds[frame//5]
         #skeleton_2d = skeleton_2d[USED_JOINT_MASK,:]
-        skeleton_2d[:, 0] *= self.img_size[0] / img_orig_size[0]
-        skeleton_2d[:, 1] *= self.img_size[1] / img_orig_size[1]
-        
+        skeleton_2d[:, 0] *= self.out_size[0] / img_orig_size[0]
+        skeleton_2d[:, 1] *= self.out_size[1] / img_orig_size[1]
         return skeleton_2d
 
     # Further processing is needed for 3D skeletons
@@ -63,23 +70,25 @@ class Human36MBaseDataset(Dataset):
         skeleton_3ds = np.load(skeleton_3d_fn)
         skeleton_3d = skeleton_3ds[frame//5]
         #skeleton_3d = skeleton_3d[USED_JOINT_MASK,:]
-        skeleton_3d[:, 0] *= self.img_size[0] / img_orig_size[0]
-        skeleton_3d[:, 1] *= self.img_size[1] / img_orig_size[1]
+        skeleton_3d[:, 0] *= self.out_size[0] / img_orig_size[0]
+        skeleton_3d[:, 1] *= self.out_size[1] / img_orig_size[1]
         return skeleton_3d
 
     def _generate_hmap(self, skeleton_2d):
-        hmap = np.zeros((skeleton_2d.shape[0]+1, self.img_size[0]//self.downsample, self.img_size[1]//self.downsample), dtype=float)
+        hmap = np.zeros((skeleton_2d.shape[0]+1, self.out_size[0]//self.downsample, self.out_size[1]//self.downsample), dtype=float)
         for i in range(0, skeleton_2d.shape[0]):
             hmap[i+1, int(skeleton_2d[i,0])//self.downsample, int(skeleton_2d[i,1])//self.downsample] = 1.0
             hmap[i+1] = gaussian_filter(hmap[i+1], sigma=3)
         hmap[hmap > 1] = 1
         hmap[hmap < 0.0099] = 0
         hmap[0] = 1.0 - np.max(hmap[1:, :, :], axis=0)
-        return torch.from_numpy(hmap)
+        return hmap
 
 class Human36M2DPoseDataset(Human36MBaseDataset):
-    def __init__(self, img_fns, skeleton_2d_dir, transforms=None, img_size=(256,256), downsample=8):
-        super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, transforms=transforms, img_size=img_size, downsample=downsample)
+    def __init__(self, img_fns, skeleton_2d_dir, transforms=None, crop_size=(512, 512), out_size=(256,256), downsample=8, mode='E'):
+        super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, transforms=transforms, out_size=out_size, downsample=downsample)
+        self.transforms_params['crop_size'] = crop_size
+        self.mode = mode
 
     def __getitem__(self, index):
         img, subset, action, frame = self._get_img_info(index)
@@ -87,26 +96,33 @@ class Human36M2DPoseDataset(Human36MBaseDataset):
         img_orig_size = (w, h)
         img = self._prepare_img(img)
         skeleton_2d = self._prepare_skeleton_2d(subset, action, frame, img_orig_size)
-        img, skeleton_2d = self.transforms(img, skeleton_2d, (512, 512), self.img_size, self.mean, self.std)
-        hmap = self._generate_hmap(skeleton_2d)
-        return img, hmap
+        img, skeleton_2d = self.transforms(img, skeleton_2d, **self.transforms_params)
+        if self.mode == 'estimation' or self.mode == 'E':
+            hmap = self._generate_hmap(skeleton_2d)
+            return ToTensor()(img), torch.from_numpy(hmap), torch.from_numpy(skeleton_2d)
+        elif self.mode == 'classification' or self.mode == 'C':
+            label = action.split('.')[0].split(' ')[0]
+            label = Human36MMetadata.classes[label]
+            return ToTensor()(img), torch.tensor(label, dtype=torch.long)
+        else:
+            raise NotImplementedError
 
 class Human36M3DPoseDataset(Human36MBaseDataset):
-    def __init__(self, img_fns, skeleton_3d_dir, transforms=None, img_size=(256,256), downsample=8):
-        super().__init__(img_fns=img_fns, skeleton_3d_dir=skeleton_3d_dir, transforms=transforms, img_size=img_size, downsample=downsample)
+    def __init__(self, img_fns, skeleton_3d_dir, transforms=None, out_size=(256,256), downsample=8):
+        super().__init__(img_fns=img_fns, skeleton_3d_dir=skeleton_3d_dir, transforms=transforms, out_size=out_size, downsample=downsample)
 
     def __getitem__(self, index):
         img, subset, action, frame = self._get_img_info(index)
         w, h, _ = img.shape
         img_orig_size = (w, h)
         img = self._prepare_img(img)
-        img = self.transforms(img)
+        img = self.transforms(img, **self.transforms_params)
         skeleton_3d = self._prepare_skeleton_3d(subset, action, frame, img_orig_size)
-        return img, torch.from_numpy(skeleton_3d)
+        return ToTensor()(img), torch.from_numpy(skeleton_3d)
 
 class Human36M2DTo3DDataset(Human36MBaseDataset):
-    def __init__(self, img_fns, skeleton_2d_dir, skeleton_3d_dir, transforms=None, img_size=(256,256), downsample=8):
-        super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, skeleton_3d_dir=skeleton_3d_dir, transforms=transforms, img_size=img_size, downsample=downsample)
+    def __init__(self, img_fns, skeleton_2d_dir, skeleton_3d_dir, transforms=None, out_size=(256,256), downsample=8):
+        super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, skeleton_3d_dir=skeleton_3d_dir, transforms=transforms, out_size=out_size, downsample=downsample)
 
     def __getitem__(self, index):
         img, subset, action, frame = self._get_img_info(index)
@@ -115,7 +131,6 @@ class Human36M2DTo3DDataset(Human36MBaseDataset):
         skeleton_2d = self._prepare_skeleton_2d(subset, action, frame, img_orig_size)
         skeleton_3d = self._prepare_skeleton_3d(subset, action, frame, img_orig_size)
         return torch.from_numpy(skeleton_2d), torch.from_numpy(skeleton_3d)
-
 
 # TODO:
 # class Human36MUnsupervised3DDataset(Human36MBaseDataset): # For pose embedding
@@ -127,7 +142,10 @@ if __name__ == '__main__':
     sys.path.append('..')
     from utils.transform import do_pos2d_train_transforms
     img_fns = glob('/scratch/PI/cqf/datasets/h36m/img/*.jpg')
-    train_dataset = Human36M2DPoseDataset(img_fns, '/scratch/PI/cqf/datasets/h36m/pos2d', transforms=do_pos2d_train_transforms)
-    img, hmap = train_dataset[0]
+    train_dataset = Human36M2DPoseDataset(img_fns, '/scratch/PI/cqf/datasets/h36m/pos2d', transforms=do_pos2d_train_transforms, mode='C')
+    #img, hmap, _ = train_dataset[0]
+    #print(img.shape)
+    #print(hmap.shape)
+    img, label = train_dataset[0]
     print(img.shape)
-    print(hmap.shape)
+    print(label)
