@@ -133,7 +133,7 @@ class Fitter:
             accuracy.update(acc.detach().item(), batch_size)
             #self.scaler.scale(loss).backward()
 
-        return ce_loss
+        return ce_loss, accuracy
 
     def train_one_epoch(self, train_loader):
         self.model.train()
@@ -150,12 +150,12 @@ class Fitter:
                         f'time: {(time.time() - t):.5f}', end='\r'
                     )
             imgs = imgs.cuda().float()
-            hmaps = hmaps.cuda().float()
+            labels = labels.cuda()
             batch_size = imgs.shape[0]
             
             with torch.cuda.amp.autocast():
                 preds = self.model(imgs)
-                loss = self.criterion(preds,hmaps)
+                loss = self.criterion(preds,labels)
 
             ce_loss.update(loss.detach().item(), batch_size)
             acc = (preds.argmax(dim=-1) == labels).float().mean()
@@ -183,7 +183,7 @@ class Fitter:
 #                 if self.config.step_scheduler:
 #                     self.scheduler.step()
 
-        return ce_loss
+        return ce_loss, accuracy
 
     
     def save(self, path):
@@ -215,10 +215,10 @@ class Fitter:
 class TrainGlobalConfig:
     num_workers = 8
     batch_size = 4 * torch.cuda.device_count()
-    n_epochs = 10 
+    n_epochs = 60 
     lr = 0.0002
 
-    folder = 'test3'
+    folder = 'ResNet18-60-1e-4'
     
 
     # -------------------

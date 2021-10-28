@@ -6,11 +6,7 @@ import os
 from scipy.ndimage.filters import gaussian_filter
 import cv2 as cv
 import json
-
-USED_JOINT_MASK = np.array([1,1,1,1,0,0,1,1,
-                            1,0,0,0,1,1,1,1,
-                            0,1,1,1,0,0,0,0,
-                            0,1,1,1,0,0,0,0],dtype=np.bool8)
+from .human36m import Human36MMetadata
 
 def pos2d_preprocess(input_dir, output_dir=None):
     if output_dir is None:
@@ -20,7 +16,7 @@ def pos2d_preprocess(input_dir, output_dir=None):
     for fn in tqdm(fns):
         raw_data = cdflib.CDF(fn)
         pts = raw_data['Pose'][:,0::5,:].reshape(-1,32,2)
-        np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts[:,USED_JOINT_MASK,:])
+        np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts[:,Human36MMetadata.used_joint_mask,:])
 
 def pos3d_preprocess(input_dir, output_dir=None):
     if output_dir is None:
@@ -30,24 +26,9 @@ def pos3d_preprocess(input_dir, output_dir=None):
     for fn in tqdm(fns):
         raw_data = cdflib.CDF(fn)
         pts = raw_data['Pose'][:,0::5,:].reshape(-1,32,3)
-        np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts[:,USED_JOINT_MASK,:])
+        np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts[:,Human36MMetadata.used_joint_mask,:])
 
-'''
-def generate_hmap(img_dir, pos2d_dir, output_dir):
-    img_fns = glob(os.path.join(img_dir, '*.jpg'))
-    for img_fn in img_fns:
-        img = cv.imread(img_fn)
-        w, h, c = img.shape
-        hmap = np.zeros((w, h), dtype=float)
-
-
-    pos2d_fns = glob(os.path.join(input_dir, 'S*/MyPoseFeatures/D2_Positions/*.npy'))
-    for fn in tqdm(fns):
-        pts = np.load(fn)
-        for i, pt in enumerate(pts):
-'''
-def get_camera_parameters(cps_file, subset, id):
-    cps = json.load(cps_file)
+def get_camera_parameters(cps, subset, id):
     Rt = cps['extrinsics'][subset][str(id)]
     R = Rt['R']
     t = Rt['t']

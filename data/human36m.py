@@ -6,17 +6,28 @@ import cv2 as cv
 from glob import glob
 import os
 from scipy.ndimage import gaussian_filter
+import json
 
 class Human36MMetadata:
+    num_classes = 14
     classes = {'Directions': 0, 'Discussion': 1, 'Eating': 2, 'Greeting': 3, 'TakingPhoto': 4, 'Photo':4, 
                'Posing': 5, 'Purchases': 6, 'Smoking': 7, 'Waiting': 8, 'Walking': 9, 'Sitting': 10, 
                'SittingDown': 10, 'Phoning': 11, 'WalkingDog': 12, 'WalkDog': 12, 'WalkTogether': 13}
     mean = np.array([0.44245931, 0.2762126, 0.2607548])
     std = np.array([0.25389833, 0.26563732, 0.24224165])
+    num_joints = 17
     used_joint_mask = np.array([1,1,1,1,0,0,1,1,
                                 1,0,0,0,1,1,1,1,
                                 0,1,1,1,0,0,0,0,
                                 0,1,1,1,0,0,0,0],dtype=np.bool8)
+    used_joint_labels = ['Hip', 'RHip', 'RKnee', 'RFoot', 'LHip', 'LKnee', 'LFoot', 
+                         'Spine', 'Thorax', 'Neck/Nose', 'Head', 'LShoulder', 
+                         'LElbow', 'LWrist', 'RShoulder', 'RElbow', 'RWrist']
+    skeleton_edges = [(10, 9), (9, 8), (8, 11), (11, 12), (12, 13), (8, 14), 
+                      (14, 15), (15, 16), (8, 7), (7, 0), (0, 1), (1, 2), (2, 3), 
+                      (0, 4), (4, 5), (5, 6)]
+    camera_parameters = json.load(open('human36m_camera_parameters.json', 'r'))
+
 
 class Human36MBaseDataset(Dataset):
     def __init__(self, img_fns, skeleton_2d_dir=None, skeleton_3d_dir=None, transforms=None, out_size=(256,256), downsample=8):

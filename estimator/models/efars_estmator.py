@@ -5,22 +5,26 @@ sys.path.append('../..')
 from utils.misc import get_max_preds
 
 class PoseEstmator(nn.Module):
-    def __init__(self, pos2dModel, pos3dModel, numJoint):
-        if pos2dModel == 'openpose':
+    def __init__(self, pos2d_model, pos3d_model, num_joints, adj=None):
+        if pos2d_model == 'openpose':
             from .openpose import OpenPose
             self.frontend = OpenPose()
             self.frontend_metadata = {'mode': 'heat_map', 'downsample': 8}
-        elif pos2dModel == 'unipose':
+        elif pos2d_model == 'unipose':
             from .unipose import UniPose
-            self.frontend = UniPose(dataset='human3.6m', num_classes=numJoint)
+            self.frontend = UniPose(dataset='human3.6m', num_classes=num_joints)
             self.frontend_metadata = {'mode': 'heat_map', 'downsample': 8}
         else:
             raise NotImplementedError
         self.frontend.eval()
 
-        if pos3dModel == 'pose2mesh':
+        if pos3d_model == 'pose2mesh':
             from .pose2mesh import PoseNet
-            self.backend = PoseNet(num_joint=numJoint)
+            self.backend = PoseNet(num_joint=num_joints)
+            self.backend_metadata = {'mode': 'positions'}
+        elif pos3d_model == 'sem_gcn':
+            from .sem_gcn import SemGCN
+            self.backend = SemGCN(adj, hid_dim=128)
             self.backend_metadata = {'mode': 'positions'}
         else:
             raise NotImplementedError
