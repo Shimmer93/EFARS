@@ -8,7 +8,7 @@ def ResNet18(num_classes, pretrained=False):
 
 def ResNet50(num_classes, pretrained=False):
     model = models.resnet50(pretrained)
-    model.fc = nn.Linear(512, num_classes)
+    model.fc = nn.Linear(2048, num_classes)
     return model
 
 def MobileNetV3Small(num_classes, pretrained=False):

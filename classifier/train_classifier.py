@@ -13,11 +13,13 @@ from datetime import datetime
 import time
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
-from models.torchvision_models import ResNet18
+from models.torchvision_models import ResNet18, ResNet50
+from models.gcn import GCNClassifier
 
-from data.human36m import Human36M2DPoseDataset
+from data.human36m import Human36M2DPoseDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything
 from utils.transform import do_pos2d_train_transforms, do_pos2d_val_transforms
+from utils.graph import adj_mx_from_edges
 
 seed_everything(1120)
 
@@ -109,7 +111,7 @@ class Fitter:
         ce_loss = AverageMeter()
         accuracy = AverageMeter()
         t = time.time()
-        for step, (imgs, labels) in enumerate(val_loader):
+        for step, (imgs, skeletons, labels) in enumerate(val_loader):
             if self.config.verbose:
                 if step % self.config.verbose_step == 0:
                     print(
@@ -121,11 +123,12 @@ class Fitter:
 
             with torch.no_grad():
                 imgs = imgs.cuda().float()
+                skeletons = skeletons.cuda().float()
                 labels = labels.cuda()
                 batch_size = imgs.shape[0]
                 
                 with torch.cuda.amp.autocast():
-                    preds = self.model(imgs)
+                    preds = self.model(skeletons)
                     loss = self.criterion(preds,labels)
 
             ce_loss.update(loss.detach().item(), batch_size)
@@ -140,7 +143,7 @@ class Fitter:
         ce_loss = AverageMeter()
         accuracy = AverageMeter()
         t = time.time()
-        for step, (imgs, labels) in enumerate(train_loader):
+        for step, (imgs, skeletons, labels) in enumerate(train_loader):
             if self.config.verbose:
                 if step % self.config.verbose_step == 0:
                     print(
@@ -150,11 +153,12 @@ class Fitter:
                         f'time: {(time.time() - t):.5f}', end='\r'
                     )
             imgs = imgs.cuda().float()
+            skeletons = skeletons.cuda().float()
             labels = labels.cuda()
             batch_size = imgs.shape[0]
             
             with torch.cuda.amp.autocast():
-                preds = self.model(imgs)
+                preds = self.model(skeletons)
                 loss = self.criterion(preds,labels)
 
             ce_loss.update(loss.detach().item(), batch_size)
@@ -218,7 +222,7 @@ class TrainGlobalConfig:
     n_epochs = 60 
     lr = 0.0002
 
-    folder = 'ResNet18-60-1e-4'
+    folder = 'ResNet50-60-1e-4-emm'
     
 
     # -------------------
@@ -241,7 +245,8 @@ class TrainGlobalConfig:
         final_div_factor=10**5
     )
     
-net = ResNet18(num_classes=14, pretrained=True).cuda()
+#net = ResNet50(num_classes=14, pretrained=False).cuda()
+net = GCNClassifier(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), hid_dim=128).cuda()
 
 def run_training():
     device = torch.device('cuda')

@@ -26,7 +26,7 @@ class Human36MMetadata:
     skeleton_edges = [(10, 9), (9, 8), (8, 11), (11, 12), (12, 13), (8, 14), 
                       (14, 15), (15, 16), (8, 7), (7, 0), (0, 1), (1, 2), (2, 3), 
                       (0, 4), (4, 5), (5, 6)]
-    camera_parameters = json.load(open('human36m_camera_parameters.json', 'r'))
+    #camera_parameters = json.load(open('human36m_camera_parameters.json', 'r'))
 
 
 class Human36MBaseDataset(Dataset):
@@ -114,7 +114,7 @@ class Human36M2DPoseDataset(Human36MBaseDataset):
         elif self.mode == 'classification' or self.mode == 'C':
             label = action.split('.')[0].split(' ')[0]
             label = Human36MMetadata.classes[label]
-            return ToTensor()(img), torch.tensor(label, dtype=torch.long)
+            return ToTensor()(img), torch.from_numpy(skeleton_2d), torch.tensor(label, dtype=torch.long)
         else:
             raise NotImplementedError
 
