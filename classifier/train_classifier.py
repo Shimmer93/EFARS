@@ -13,7 +13,7 @@ from datetime import datetime
 import time
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
-from models.torchvision_models import ResNet18, ResNet50
+from models.torchvision_models import ResNet18, ResNet50, MobileNetV3Small
 from models.gcn import GCNClassifier
 
 from data.human36m import Human36M2DPoseDataset, Human36MMetadata
@@ -128,7 +128,7 @@ class Fitter:
                 batch_size = imgs.shape[0]
                 
                 with torch.cuda.amp.autocast():
-                    preds = self.model(skeletons)
+                    preds = self.model(imgs)
                     loss = self.criterion(preds,labels)
 
             ce_loss.update(loss.detach().item(), batch_size)
@@ -158,7 +158,7 @@ class Fitter:
             batch_size = imgs.shape[0]
             
             with torch.cuda.amp.autocast():
-                preds = self.model(skeletons)
+                preds = self.model(imgs)
                 loss = self.criterion(preds,labels)
 
             ce_loss.update(loss.detach().item(), batch_size)
@@ -222,7 +222,7 @@ class TrainGlobalConfig:
     n_epochs = 60 
     lr = 0.0002
 
-    folder = 'ResNet50-60-1e-4-emm'
+    folder = 'MobileNet-60-1e-3'
     
 
     # -------------------
@@ -236,7 +236,7 @@ class TrainGlobalConfig:
 
     SchedulerClass = torch.optim.lr_scheduler.OneCycleLR
     scheduler_params = dict(
-        max_lr=1e-4,
+        max_lr=1e-3,
         #total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
         epochs=n_epochs,
         steps_per_epoch=int(len(train_dataset) / batch_size),
@@ -245,8 +245,9 @@ class TrainGlobalConfig:
         final_div_factor=10**5
     )
     
-#net = ResNet50(num_classes=14, pretrained=False).cuda()
-net = GCNClassifier(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), hid_dim=128).cuda()
+#net = ResNet18(num_classes=14, pretrained=True).cuda()
+net = MobileNetV3Small(num_classes=14, pretrained=True).cuda()
+#net = GCNClassifier(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), hid_dim=128).cuda()
 
 def run_training():
     device = torch.device('cuda')

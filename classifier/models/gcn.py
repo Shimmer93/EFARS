@@ -249,16 +249,16 @@ class GCNClassifier(nn.Module):
 
     def forward(self, x):
         out = self.gconv_input(x)
-        print(f'in: {out.shape}')
+        #print(f'in: {out.shape}')
         out = self.gconv_layers(out)
-        print(f'layers: {out.shape}')
+        #print(f'layers: {out.shape}')
         #out = torch.flatten(out, start_dim=1)
         out = out.transpose(1,2)
         out = self.pool(out)
         out = out.squeeze()
         #out = self.gconv_output(out)
         out = self.classifier(out)
-        print(f'out: {out.shape}')
+        #print(f'out: {out.shape}')
         return out
 
 if __name__ == '__main__':

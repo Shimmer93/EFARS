@@ -37,10 +37,10 @@ def get_random_crop_positions_with_pos2d(img, pos2d, crop_size):
 def do_pos2d_train_transforms(img, pos2d, **kwargs):
     x_min, y_min, x_max, y_max = get_random_crop_positions_with_pos2d(img, pos2d, kwargs['crop_size'])
     transforms = A.Compose([
-        #A.Crop(x_min, y_min, x_max, y_max, p=0.5),
+        A.Crop(x_min, y_min, x_max, y_max, p=0.5),
         #A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2, p=0.9),
         A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.9),
-        #A.Blur(blur_limit=3,p=0.2),
+        A.Blur(blur_limit=3,p=0.2),
         A.HorizontalFlip(p=0.5),
         A.Resize(height=kwargs['out_size'][0], width=kwargs['out_size'][1], p=1)
     ], keypoint_params=A.KeypointParams(format='xy'))
