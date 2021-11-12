@@ -4,9 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 def show_img_with_pos2d(img, pos2d, denormalize=None):
-    img_tensor = denormalize(img) if denormalize != None else img
-    img_array = (img_tensor.numpy() * 255.0).astype(np.uint8)
+    img_array = img.numpy()
     img_array = img_array.transpose(1, 2, 0)
+    img_array = denormalize(img_array) if denormalize != None else img
 
     for pt in pos2d:
         pt = (int(pt[0]), int(pt[1]))
@@ -25,3 +25,15 @@ def project_pos3d_to_pos2d(pos3d, R, t, cali):
 def show_img_with_pos3d(img, pos3d, R, t, cali, denormalize=None):
     pos2d = project_pos3d_to_pos2d(pos3d, R, t, cali)
     show_img_with_pos2d(img, pos2d, denormalize)
+
+def show_img_with_hmap(img, hmap, denormalize=None):
+    img_array = img.numpy()
+    img_array = img_array.transpose(1, 2, 0)
+    img_array = denormalize(img_array) if denormalize != None else img
+
+    hmap_array = hmap.numpy().sum(axis=0)
+
+    ig, axes = plt.subplots(ncols=2, nrows=1)
+    axes[0].imshow(img_array)
+    axes[1].imshow(hmap_array)
+    plt.show()

@@ -53,7 +53,7 @@ class Human36MBaseDataset(Dataset):
         fn_split = img_fn.split('_')
         subset = fn_split[0].split('/')[-1]
         action = fn_split[1] + ' ' + fn_split[2] if len(fn_split) == 4 else fn_split[1]
-        frame = int(fn_split[2].split('.')[0])
+        frame = int(fn_split[-1].split('.')[0])
 
         return img_fn, subset, action, frame        
         
@@ -147,38 +147,38 @@ class Human36M2DTemporalDataset(Human36MBaseDataset):
         img_seq = []
         skeleton_2d_seq = []
         for i in range(self.length):
-            img_fn_new = '_'.join(img_fn.split('_')[:-1]) + f'{(frame+5*i):0>6d}.jpg'
+            img_fn_new = '_'.join(img_fn.split('_')[:-1]) + f'_{(frame+5*i):0>6d}.jpg'
+            #print(f'The {i}-th image. Frame:{frame}, File name: {img_fn_new}, Origin name: {img_fn}')
             if img_fn_new in self.img_fns:
-                img_new = cv.imread(img_fn_new)
-                img_new = self._prepare_img(img_new)
+                img_new = self._prepare_img(img_fn_new)
             else:
                 img_new = np.copy(img_seq[-1])
+                    
             img_seq.append(img_new)
 
             skeleton_2d = self._prepare_skeleton_2d(subset, action, frame+5*i)
             skeleton_2d_seq.append(skeleton_2d)
+    
 
         img_seq = np.stack(img_seq)
         skeleton_2d_seq = np.stack(skeleton_2d_seq)
 
-        t, c, h, w = img_seq.shape
-        img_seq = img_seq.reshape(t*c, h, w)
-        t, n, d = skeleton_2d_seq.shape
+        t, h, w, c = img_seq.shape
+        img_seq = img_seq.transpose(1, 2, 0, 3).reshape(h, w, t*c)
+        _, n, d = skeleton_2d_seq.shape
         skeleton_2d_seq = skeleton_2d_seq.reshape(t*n, d)
         img_seq, skeleton_2d_seq = self.transforms(img_seq, skeleton_2d_seq, **self.transforms_params)
+        img_seq = img_seq.reshape(self.out_size[0], self.out_size[1], t, c).transpose(2, 0, 1, 3)
+        #skeleton_2d_seq = skeleton_2d_seq.reshape(t, n, d)
 
-        if self.mode == 'estimation' or self.mode == 'E': 
-            hmap_seq = self._generate_hmap(skeleton_2d)
-            img_seq = img_seq.reshape(t, c, h, w)
-            skeleton_2d_seq = skeleton_2d_seq.reshape(t, n, d)
-            hmap_seq = hmap_seq.reshape(t, n, h, w)
-            return ToTensor()(img_seq), torch.from_numpy(skeleton_2d_seq), torch.from_numpy(hmap_seq)
+        if self.mode == 'estimation' or self.mode == 'E':
+            hmap_seq = [self._generate_hmap(skeleton_2d_seq[i]) for i in range(t)]
+            hmap_seq = np.stack(hmap_seq)
+            return torch.from_numpy(img_seq.transpose(0, 3, 1, 2)), torch.from_numpy(skeleton_2d_seq), torch.from_numpy(hmap_seq)
         elif self.mode == 'classification' or self.mode == 'C':
             label = action.split('.')[0].split(' ')[0]
             label = Human36MMetadata.classes[label]
-            img_seq = img_seq.reshape(t, c, h, w)
-            skeleton_2d_seq = skeleton_2d_seq.reshape(t, n, d)
-            return ToTensor()(img_seq), torch.from_numpy(skeleton_2d_seq), torch.tensor(label, dtype=torch.long)
+            return torch.from_numpy(img_seq.transpose(0, 3, 1, 2)), torch.tensor(label, dtype=torch.long)
         else:
             raise NotImplementedError
 
@@ -192,10 +192,10 @@ if __name__ == '__main__':
     sys.path.append('..')
     from utils.transform import do_pos2d_train_transforms
     img_fns = glob('/scratch/PI/cqf/datasets/h36m/img/*.jpg')
-    train_dataset = Human36M2DPoseDataset(img_fns, '/scratch/PI/cqf/datasets/h36m/pos2d', transforms=do_pos2d_train_transforms, mode='C')
+    train_dataset = Human36M2DTemporalDataset(img_fns, '/scratch/PI/cqf/datasets/h36m/pos2d', transforms=do_pos2d_train_transforms, mode='E')
     #img, hmap, _ = train_dataset[0]
     #print(img.shape)
     #print(hmap.shape)
-    img, label = train_dataset[0]
+    img, skeleton, hmap = train_dataset[907]
     print(img.shape)
-    print(label)
+    print(hmap.shape)
