@@ -45,7 +45,6 @@ def get_random_crop_positions_with_pos2d(img, pos2d, crop_size):
         x_max = x_min + crop_size[0]
         y_max = y_min + crop_size[1]
 
-    assert x_min < x_max and y_min < y_max
     return x_min, y_min, x_max, y_max
 
 def do_pos2d_train_transforms(img, pos2d, **kwargs):

@@ -10,7 +10,7 @@ from torchvision.models import resnet18, resnet101
 class CNNLSTM(nn.Module):
     def __init__(self, num_classes=2):
         super(CNNLSTM, self).__init__()
-        self.resnet = resnet101(pretrained=True)
+        self.resnet = resnet18(pretrained=True)
         self.resnet.fc = nn.Sequential(nn.Linear(self.resnet.fc.in_features, 300))
         self.lstm = nn.LSTM(input_size=300, hidden_size=256, num_layers=3)
         self.fc1 = nn.Linear(256, 128)

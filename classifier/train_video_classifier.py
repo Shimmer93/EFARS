@@ -16,6 +16,7 @@ from torch.utils.data.sampler import SequentialSampler, RandomSampler
 #from models.torchvision_models import ResNet18, ResNet50, MobileNetV3Small
 from models.lstm import CNNLSTM
 from models.gcn import GCNClassifier
+from models.temporal import ShuffleNetV2, MobileNetV2, SqueezeNet
 
 from data.human36m import Human36M2DTemporalDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything
@@ -124,6 +125,7 @@ class Fitter:
 
             with torch.no_grad():
                 imgs = imgs.cuda().float()
+                imgs = imgs.transpose(1,2)
                 #skeletons = skeletons.cuda().float()
                 labels = labels.cuda()
                 batch_size = imgs.shape[0]
@@ -154,6 +156,7 @@ class Fitter:
                         f'time: {(time.time() - t):.5f}', end='\r'
                     )
             imgs = imgs.cuda().float()
+            imgs = imgs.transpose(1,2)
             #skeletons = skeletons.cuda().float()
             labels = labels.cuda()
             batch_size = imgs.shape[0]
@@ -223,7 +226,7 @@ class TrainGlobalConfig:
     n_epochs = 60 
     lr = 0.0002
 
-    folder = 'CNNLSTM-60-1e-3'
+    folder = 'ShuffleNet-60-1e-4'
     
 
     # -------------------
@@ -237,7 +240,7 @@ class TrainGlobalConfig:
 
     SchedulerClass = torch.optim.lr_scheduler.OneCycleLR
     scheduler_params = dict(
-        max_lr=1e-3,
+        max_lr=1e-4,
         #total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
         epochs=n_epochs,
         steps_per_epoch=int(len(train_dataset) / batch_size),
@@ -247,7 +250,8 @@ class TrainGlobalConfig:
     )
     
 #net = ResNet18(num_classes=14, pretrained=True).cuda()
-net = CNNLSTM(num_classes=14).cuda()
+#net = CNNLSTM(num_classes=14).cuda()
+net = ShuffleNetV2(num_classes=14, sample_size=256).cuda()
 #net = GCNClassifier(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), hid_dim=128).cuda()
 
 def run_training():
