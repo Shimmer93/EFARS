@@ -7,6 +7,7 @@ def show_img_with_pos2d(img, pos2d, denormalize=None):
     img_array = img.numpy()
     img_array = img_array.transpose(1, 2, 0)
     img_array = denormalize(img_array) if denormalize != None else img
+    img_array = (img_array * 255).astype(np.uint8)
 
     for pt in pos2d:
         pt = (int(pt[0]), int(pt[1]))

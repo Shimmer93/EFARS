@@ -30,7 +30,7 @@ class Human36MMetadata:
 
 
 class Human36MBaseDataset(Dataset):
-    def __init__(self, img_fns, skeleton_2d_dir=None, skeleton_3d_dir=None, transforms=None, out_size=(256,256), downsample=8):
+    def __init__(self, img_fns, skeleton_2d_dir=None, skeleton_3d_dir=None, transforms=None, out_size=(256,256), downsample=8, sigma=3):
         super().__init__()
         self.img_fns = img_fns
         self.skeleton_2d_dir = skeleton_2d_dir
@@ -43,6 +43,7 @@ class Human36MBaseDataset(Dataset):
         }
         self.out_size = out_size
         self.downsample = downsample
+        self.sigma = sigma
 
     def __len__(self):
         return len(self.img_fns)
@@ -82,19 +83,29 @@ class Human36MBaseDataset(Dataset):
             skeleton_3d = np.copy(skeleton_3ds[-1].clone())
         return skeleton_3d
 
-    def _generate_hmap(self, skeleton_2d):
-        hmap = np.zeros((skeleton_2d.shape[0]+1, self.out_size[0]//self.downsample, self.out_size[1]//self.downsample), dtype=float)
+    def _generate_hmap2(self, skeleton_2d):
+        hmap = np.zeros((skeleton_2d.shape[0], self.out_size[0], self.out_size[1]), dtype=float)
         for i in range(0, skeleton_2d.shape[0]):
-            hmap[i+1, int(skeleton_2d[i,0])//self.downsample, int(skeleton_2d[i,1])//self.downsample] = 1.0
-            hmap[i+1] = gaussian_filter(hmap[i+1], sigma=3)
+            hmap[i, int(skeleton_2d[i,1])//self.downsample, int(skeleton_2d[i,0])//self.downsample] = 1.0
+            hmap[i] = gaussian_filter(hmap[i], sigma=self.sigma)
         hmap[hmap > 1] = 1
-        hmap[hmap < 0.0099] = 0
-        hmap[0] = 1.0 - np.max(hmap[1:, :, :], axis=0)
+        hmap[hmap < 0.001] = 0
+        return hmap
+
+    def _generate_hmap(self, skeleton_2d):
+        hmap = np.zeros((self.out_size[0], self.out_size[1], skeleton_2d.shape[0]), dtype=float)
+        for i in range(0, skeleton_2d.shape[0]):
+            hmap[int(skeleton_2d[i,1]), int(skeleton_2d[i,0]), i] = 1.0
+            hmap[:, :, i] = gaussian_filter(hmap[:, :, i], sigma=self.sigma)
+        hmap[hmap > 1] = 1
+        hmap[hmap < 0.001] = 0
+        hmap = cv.resize(hmap, (self.out_size[0]//self.downsample, self.out_size[1]//self.downsample), cv.INTER_LINEAR)
+        hmap = hmap.transpose(2, 0, 1)
         return hmap
 
 class Human36M2DPoseDataset(Human36MBaseDataset):
-    def __init__(self, img_fns, skeleton_2d_dir, transforms=None, crop_size=(512, 512), out_size=(256,256), downsample=8, mode='E'):
-        super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, transforms=transforms, out_size=out_size, downsample=downsample)
+    def __init__(self, img_fns, skeleton_2d_dir, transforms=None, crop_size=(512, 512), out_size=(256,256), downsample=8, sigma=3, mode='E'):
+        super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, transforms=transforms, out_size=out_size, downsample=downsample, sigma=sigma)
         self.transforms_params['crop_size'] = crop_size
         self.mode = mode
 
@@ -135,8 +146,8 @@ class Human36M2DTo3DDataset(Human36MBaseDataset):
         return torch.from_numpy(skeleton_2d), torch.from_numpy(skeleton_3d)
 
 class Human36M2DTemporalDataset(Human36MBaseDataset):
-    def __init__(self, img_fns, skeleton_2d_dir, transforms=None, crop_size=(512, 512), out_size=(256,256), downsample=8, mode='E', length=5):
-        super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, transforms=transforms, out_size=out_size, downsample=downsample)
+    def __init__(self, img_fns, skeleton_2d_dir, transforms=None, crop_size=(512, 512), out_size=(256,256), downsample=8, sigma=3, mode='E', length=5):
+        super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, transforms=transforms, out_size=out_size, downsample=downsample, sigma=sigma)
         self.transforms_params['crop_size'] = crop_size
         self.mode = mode
         self.length = length
@@ -169,7 +180,7 @@ class Human36M2DTemporalDataset(Human36MBaseDataset):
         skeleton_2d_seq = skeleton_2d_seq.reshape(t*n, d)
         img_seq, skeleton_2d_seq = self.transforms(img_seq, skeleton_2d_seq, **self.transforms_params)
         img_seq = img_seq.reshape(self.out_size[0], self.out_size[1], t, c).transpose(2, 0, 1, 3)
-        #skeleton_2d_seq = skeleton_2d_seq.reshape(t, n, d)
+        skeleton_2d_seq = skeleton_2d_seq.reshape(t, n, d)
 
         if self.mode == 'estimation' or self.mode == 'E':
             hmap_seq = [self._generate_hmap(skeleton_2d_seq[i]) for i in range(t)]

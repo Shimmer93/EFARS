@@ -226,11 +226,11 @@ class TrainGlobalConfig:
     n_epochs = 60 
     lr = 0.0002
 
-    folder = 'ShuffleNet-60-1e-4'
+    folder = 'MobileNet-60-1e-4'
     
 
     # -------------------
-    verbose = False
+    verbose = True
     verbose_step = 1
     # -------------------
 
@@ -251,7 +251,7 @@ class TrainGlobalConfig:
     
 #net = ResNet18(num_classes=14, pretrained=True).cuda()
 #net = CNNLSTM(num_classes=14).cuda()
-net = ShuffleNetV2(num_classes=14, sample_size=256).cuda()
+net = MobileNetV2(num_classes=14, sample_size=256).cuda()
 #net = GCNClassifier(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), hid_dim=128).cuda()
 
 def run_training():
