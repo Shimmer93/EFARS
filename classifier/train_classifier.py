@@ -21,7 +21,9 @@ from utils.misc import AverageMeter, seed_everything
 from utils.transform import do_pos2d_train_transforms, do_pos2d_val_transforms
 from utils.graph import adj_mx_from_edges
 
-seed_everything(1120)
+from utils.parser import args
+
+seed_everything(args.seed)
 
 root_path = '/scratch/PI/cqf/datasets/h36m'
 img_path = root_path + '/img'
@@ -30,20 +32,20 @@ pos2d_path = root_path + '/pos2d'
 img_fns = glob(img_path+'/*.jpg')
 split = int(0.8*len(img_fns))
 random.shuffle(img_fns)
-train_fns = img_fns[:10000]
-val_fns = img_fns[10000:12000]
+train_fns = img_fns[:50000]
+val_fns = img_fns[50000:60000]
 
 # TODO: transforms
 
-train_dataset = Human36M2DPoseDataset(train_fns, pos2d_path, transforms=do_pos2d_train_transforms, mode='C')
-val_dataset = Human36M2DPoseDataset(val_fns, pos2d_path, transforms=do_pos2d_val_transforms, mode='C')
+train_dataset = Human36M2DPoseDataset(train_fns, pos2d_path, transforms=do_pos2d_train_transforms, out_size=(368, 368), mode='C')
+val_dataset = Human36M2DPoseDataset(val_fns, pos2d_path, transforms=do_pos2d_val_transforms, out_size=(368, 368), mode='C')
 
 class Fitter:
     def __init__(self, model, device, config):
         self.config = config
         self.epoch = 0
 
-        self.base_dir = f'/home/zpengac/pose/EFARS/estimator/checkpoints/{config.folder}'
+        self.base_dir = f'/home/zpengac/pose/EFARS/classifier/checkpoints/{config.folder}'
         if not os.path.exists(self.base_dir):
             os.makedirs(self.base_dir)
         
@@ -217,12 +219,12 @@ class Fitter:
             
             
 class TrainGlobalConfig:
-    num_workers = 8
-    batch_size = 4 * torch.cuda.device_count()
-    n_epochs = 60 
-    lr = 0.0002
+    num_workers = args.num_workers
+    batch_size = args.batch_size * torch.cuda.device_count()
+    n_epochs = args.n_epochs
 
-    folder = 'MobileNet-60-1e-3'
+    folder = args.output_path
+    lr = args.max_lr
     
 
     # -------------------
@@ -236,17 +238,17 @@ class TrainGlobalConfig:
 
     SchedulerClass = torch.optim.lr_scheduler.OneCycleLR
     scheduler_params = dict(
-        max_lr=1e-3,
+        max_lr=args.max_lr,
         #total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
         epochs=n_epochs,
         steps_per_epoch=int(len(train_dataset) / batch_size),
-        pct_start=0.3,
-        anneal_strategy='cos', 
-        final_div_factor=10**5
+        pct_start=args.pct_start,
+        anneal_strategy=args.anneal_strategy, 
+        final_div_factor=args.final_div_factor
     )
     
-#net = ResNet18(num_classes=14, pretrained=True).cuda()
-net = MobileNetV3Small(num_classes=14, pretrained=True).cuda()
+net = ResNet50(num_classes=Human36MMetadata.num_classes, pretrained=True).cuda()
+#net = MobileNetV3Small(num_classes=Human36MMetadata.num_classes, pretrained=True).cuda()
 #net = GCNClassifier(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), hid_dim=128).cuda()
 
 def run_training():

@@ -251,6 +251,179 @@ class SemGCN(nn.Module):
         out = self.gconv_output(out)
         return out
 
+class GCNLSTM(nn.Module):
+    def __init__(self, adj, hid_dim, coords_dim=(2, 3), num_layers=4, nodes_group=None, p_dropout=None):
+        super(GCNLSTM, self).__init__()
+        self.gcn = SemGCN(adj, hid_dim, coords_dim, num_layers, nodes_group, p_dropout)
+        self.lstm = nn.LSTM(input_size=51, hidden_size=hid_dim, num_layers=3, batch_first=True, bidirectional=True)
+        self.fc1 = nn.Linear(hid_dim * 2, hid_dim * 2)
+        self.fc2 = nn.Linear(hid_dim * 2, 51)
+        self.hid_dim = hid_dim
+
+        self.init_params()
+
+    def forward(self, xs):
+        b, t, n, _ = xs.shape
+        ys = []
+        for i in range(t):
+            y = self.gcn(xs[:,i,:,:])
+            ys.append(y)
+        ys = torch.stack(ys, dim=1)
+        ys = ys.reshape(b, t, n * 3)
+        out, _ = self.lstm(ys)
+        out = out.reshape(b * t, self.hid_dim * 2)
+        out = self.fc1(out).relu()
+        out = self.fc2(out)
+        out = out.reshape(b, t, n, 3)
+        return out
+
+    def init_params(self):
+        for _, param in self.lstm.named_parameters():
+            nn.init.uniform_(param, -0.1, 0.1)
+
+        for _, param in self.fc1.named_parameters():
+            nn.init.uniform_(param, -0.1, 0.1)
+
+        for _, param in self.fc2.named_parameters():
+            nn.init.uniform_(param, -0.1, 0.1)
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=100):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+ 
+
+class GCNTransformer(nn.Module):
+    def __init__(self, adj, hid_dim, coords_dim=(2, 3), num_layers=4, nodes_group=None, p_dropout=None):
+        super(GCNTransformer, self).__init__()
+        self.gcn = SemGCN(adj, hid_dim, coords_dim, num_layers, nodes_group, p_dropout)
+        self.transformer = nn.Transformer(d_model=hid_dim, nhead=16, batch_first=True)
+        self.fc1 = nn.Linear(51, hid_dim)
+        self.fc2 = nn.Linear(hid_dim, 51)
+        #self.pos_enc = PositionalEncoding(hid_dim)
+        #self.pos_dec = PositionalEncoding(hid_dim)
+        self.hid_dim = hid_dim
+        mask = self.transformer.generate_square_subsequent_mask(5)
+        self.register_buffer('mask', mask)
+
+        self.init_params()
+
+    def forward(self, xs, ts):
+        b, t, n, _ = xs.shape
+        ys = []
+        for i in range(t):
+            y = self.gcn(xs[:,i,:,:])
+            ys.append(y)
+        ys = torch.stack(ys, dim=1)
+        ys = ys.reshape(b * t, n * 3)
+        hts = ts.reshape(b * t, n * 3)
+        ys = self.fc1(ys)
+        hts = self.fc1(hts)
+        ys = ys.reshape(b, t, self.hid_dim)
+        hts = hts.reshape(b, t, self.hid_dim)
+        #ys = self.pos_enc(ys)
+        #ts = self.pos_dec(ts)
+        out = self.transformer(ys, hts, tgt_mask = self.mask)
+        out = self.fc2(out)
+        out = out.reshape(b, t, n, 3)
+        return out
+
+    def init_params(self):
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.uniform_(self.fc1.weight, -0.1, 0.1)
+        nn.init.zeros_(self.fc2.bias)
+        nn.init.uniform_(self.fc2.weight, -0.1, 0.1)
+        for _, param in self.transformer.named_parameters():
+            nn.init.uniform_(param, -0.1, 0.1)
+
+class PureTransformer(nn.Module):
+    def __init__(self, hid_dim):
+        super(PureTransformer, self).__init__()
+        self.transformer = nn.Transformer(d_model=hid_dim, nhead=16, batch_first=True)
+        self.fc1 = nn.Linear(34, hid_dim)
+        self.fc2 = nn.Linear(51, hid_dim)
+        self.fc3 = nn.Linear(hid_dim, 51)
+        #self.pos_enc = PositionalEncoding(hid_dim)
+        #self.pos_dec = PositionalEncoding(hid_dim)
+        self.hid_dim = hid_dim
+        mask = self.transformer.generate_square_subsequent_mask(5)
+        self.register_buffer('mask', mask)
+
+        self.init_params()
+
+    def forward(self, xs, ts):
+        b, t, n, _ = xs.shape
+        hxs = xs.reshape(b * t, n * 2)
+        hts = ts.reshape(b * t, n * 3)
+        hxs = self.fc1(hxs)
+        hts = self.fc2(hts)
+        hxs = hxs.reshape(b, t, self.hid_dim)
+        hts = hts.reshape(b, t, self.hid_dim)
+        #ys = self.pos_enc(ys)
+        #ts = self.pos_dec(ts)
+        out = self.transformer(hxs, hts, tgt_mask = self.mask)
+        out = self.fc3(out)
+        out = out.reshape(b, t, n, 3)
+        return out
+
+    def init_params(self):
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.uniform_(self.fc1.weight, -0.1, 0.1)
+        nn.init.zeros_(self.fc2.bias)
+        nn.init.uniform_(self.fc2.weight, -0.1, 0.1)
+        nn.init.zeros_(self.fc3.bias)
+        nn.init.uniform_(self.fc3.weight, -0.1, 0.1)
+        for _, param in self.transformer.named_parameters():
+            nn.init.uniform_(param, -0.1, 0.1)
+                
+class GCNTransformerModel(nn.Module):
+    def __init__(self, adj, hid_dim, coords_dim=(2, 3), num_layers=4, nodes_group=None, p_dropout=None):
+        super(GCNTransformerModel, self).__init__()
+        self.gcn = SemGCN(adj, hid_dim, coords_dim, num_layers, nodes_group, p_dropout)
+        encoder_layers = nn.TransformerEncoderLayer(d_model=hid_dim, nhead=8, batch_first=True)
+        self.encoder = nn.TransformerEncoder(encoder_layers, 6)
+        
+        self.fc1 = nn.Linear(51, hid_dim)
+        self.fc2 = nn.Linear(hid_dim, 51)
+        self.pos_enc = PositionalEncoding(hid_dim)
+        self.hid_dim = hid_dim
+
+        self.init_params()
+
+    def forward(self, xs):
+        b, t, n, _ = xs.shape
+        ys = []
+        for i in range(t):
+            y = self.gcn(xs[:,i,:,:])
+            ys.append(y)
+        ys = torch.stack(ys, dim=1)
+        ys = ys.reshape(b * t, n * 3)
+        ys = self.fc1(ys)
+        ys = ys.reshape(b, t, self.hid_dim) * math.sqrt(self.hid_dim)
+        ys = self.pos_enc(ys)
+        ys = self.encoder(ys)
+        out = self.fc2(ys)
+        out = out.reshape(b, t, n, 3)
+        return out
+
+    def init_params(self):
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.uniform_(self.fc1.weight, -0.1, 0.1)
+        nn.init.zeros_(self.fc2.bias)
+        nn.init.uniform_(self.fc2.weight, -0.1, 0.1)
+
 if __name__ == '__main__':
     import torch
     import sys
@@ -258,8 +431,14 @@ if __name__ == '__main__':
     from utils.graph import adj_mx_from_edges
     from data.human36m import Human36MMetadata
 
-    m = SemGCN(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), hid_dim=128)
-    x = torch.randn(2,17,2)
+    #m = GCNLSTM(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), hid_dim=128)
+    #m = PureTransformer(128)
+    m = GCNTransformerModel(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), hid_dim=128)
+    #edges = list(filter(lambda x: x[1] >= 0, zip(list(range(0, Human36MMetadata.num_joints_orig)), Human36MMetadata.parents)))[:15]
+    #print(len(edges))
+    #m = SemGCN(adj=adj_mx_from_edges(16, edges, sparse=False), hid_dim=128, nodes_group=Human36MMetadata.skeleton_joints_group)
+    x = torch.randn(2,5,17,2)
+    #t = torch.randn(2,5,17,3)
     y = m(x)
     print(y.shape)
     

@@ -43,7 +43,7 @@ class ShuffleNetInvertedResidual(nn.Module):
         
         if self.stride == 1:
             #assert inp == oup_inc
-        	self.banch2 = nn.Sequential(
+            self.banch2 = nn.Sequential(
                 # pw
                 nn.Conv3d(oup_inc, oup_inc, 1, 1, 0, bias=False),
                 nn.BatchNorm3d(oup_inc),
@@ -292,7 +292,7 @@ class Fire(nn.Module):
 
         out = torch.cat([out1, out2], 1)
         if self.use_bypass:
-        	out += x
+            out += x
         out = self.relu(out)
 
         return out

@@ -239,13 +239,15 @@ class GCNClassifier(nn.Module):
 
         self.gconv_input = nn.Sequential(*_gconv_input)
         self.gconv_layers = nn.Sequential(*_gconv_layers)
-        self.gconv_output = SemGraphConv(hid_dim, coords_dim[1], adj)
+        #self.gconv_output = SemGraphConv(hid_dim, hid_dim, adj)
         self.pool = nn.AdaptiveAvgPool1d(1)
         self.classifier = nn.Sequential(
-            nn.Linear(hid_dim, hid_dim),
+            nn.Linear(hid_dim, 2048),
             nn.ReLU(),
-            nn.Linear(hid_dim, num_classes)
+            nn.Linear(2048, num_classes)
             )
+
+        self.init_params()
 
     def forward(self, x):
         out = self.gconv_input(x)
@@ -257,9 +259,15 @@ class GCNClassifier(nn.Module):
         out = self.pool(out)
         out = out.squeeze()
         #out = self.gconv_output(out)
+        #b, n, d = out.shape
+        #out = torch.reshape(b, n * d)
         out = self.classifier(out)
         #print(f'out: {out.shape}')
         return out
+
+    def init_params(self):
+        for _, param in self.classifier:
+            nn.init.uniform_(param, -0.1, 0.1)
 
 if __name__ == '__main__':
     import torch

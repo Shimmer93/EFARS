@@ -28,10 +28,11 @@ def pos3d_preprocess(input_dir, output_dir=None):
         pts = raw_data['Pose'][:,0::5,:].reshape(-1,32,3)
         np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts[:,Human36MMetadata.used_joint_mask,:])
 
-def get_camera_parameters(cps, subset, id):
+def get_project_matrix(cps, subset, id):
     Rt = cps['extrinsics'][subset][str(id)]
     R = Rt['R']
     t = Rt['t']
     cali = cps['intrinsics'][str(id)]['calibration_matrix']
+    P = cali @ np.hstack([R, t])
 
-    return R, t, cali
+    return P

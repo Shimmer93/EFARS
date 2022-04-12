@@ -13,17 +13,22 @@ from datetime import datetime
 import time
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
-from models.openpose import OpenPose
-from models.unipose import UniPose
-from data.human36m import Human36M2DPoseDataset
-from utils.transform import do_pos2d_train_transforms, do_pos2d_val_transforms
+from models.sem_gcn import SemGCN, GCNLSTM, GCNTransformer, PureTransformer, GCNTransformerModel
+from models.pose2mesh import PoseNet
+from models.simple_graph import GCN
+from data.human36m import Human36M2DTo3DTemporalDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything
+from utils.graph import adj_mx_from_edges
+from utils.transform import do_2d_to_3d_transforms
 
-seed_everything(2333)
+from utils.parser import args
+
+seed_everything(args.seed)
 
 root_path = '/scratch/PI/cqf/datasets/h36m'
 img_path = root_path + '/img'
 pos2d_path = root_path + '/pos2d'
+pos3d_path = root_path + '/pos3d'
 
 img_fns = glob(img_path+'/*.jpg')
 split = int(0.8*len(img_fns))
@@ -31,8 +36,8 @@ random.shuffle(img_fns)
 train_fns = img_fns[:10000]
 val_fns = img_fns[10000:12000]
 
-train_dataset = Human36M2DPoseDataset(train_fns, pos2d_path, transforms=do_pos2d_train_transforms, out_size=(256,256), mode='E', sigma=1)
-val_dataset = Human36M2DPoseDataset(val_fns, pos2d_path, transforms=do_pos2d_val_transforms, out_size=(256,256), mode='E', sigma=1)
+train_dataset = Human36M2DTo3DTemporalDataset(train_fns, pos2d_path, pos3d_path, length=5)
+val_dataset = Human36M2DTo3DTemporalDataset(val_fns, pos2d_path, pos3d_path, length=5)
 
 class Fitter:
     def __init__(self, model, device, config):
@@ -98,7 +103,7 @@ class Fitter:
         self.model.eval()
         mse_loss = AverageMeter()
         t = time.time()
-        for step, (imgs, hmaps, skeletons) in enumerate(val_loader):
+        for step, (pos2ds, pos3ds) in enumerate(val_loader):
             if self.config.verbose:
                 if step % self.config.verbose_step == 0:
                     print(
@@ -108,16 +113,23 @@ class Fitter:
                     )
 
             with torch.no_grad():
-                imgs = imgs.cuda().float()
-                hmaps = hmaps.cuda().float()
-                batch_size = imgs.shape[0]
+                pos2ds = pos2ds.cuda().float()
+                pos3ds = pos3ds.cuda().float()
+                batch_size = pos2ds.shape[0]
+
+                #pos3ds_in = pos3ds[:,:-1,...]
+                pos3ds_out = pos3ds[:,1:,...]
                  
                 with torch.cuda.amp.autocast():
-                    preds = self.model(imgs)
-                    loss = self.criterion(preds,hmaps)
+                    #preds = self.model(pos2ds, pos3ds_in)
+                    preds = self.model(pos2ds)
+                    loss = self.criterion(preds,pos3ds_out)
 
             mse_loss.update(loss.detach().item(), batch_size)
             #self.scaler.scale(loss).backward()
+
+        #if self.config.step_scheduler:
+        #    self.scheduler.step(loss)
 
         return mse_loss
 
@@ -125,7 +137,7 @@ class Fitter:
         self.model.train()
         mse_loss = AverageMeter()
         t = time.time()
-        for step, (imgs, hmaps, skeletons) in enumerate(train_loader):
+        for step, (pos2ds, pos3ds) in enumerate(train_loader):
             if self.config.verbose:
                 if step % self.config.verbose_step == 0:
                     print(
@@ -133,16 +145,17 @@ class Fitter:
                         f'mse_loss: {mse_loss.avg:.8f}, ' + \
                         f'time: {(time.time() - t):.5f}', end='\r'
                     )
-            imgs = imgs.cuda().float()
-            hmaps = hmaps.cuda().float()
-            hmaps_sum = hmaps.sum(dim=1).unsqueeze(1)
-            hmaps_minus = torch.clamp(1 - hmaps_sum, 0, 1)
-            hmaps = torch.cat((hmaps, hmaps_minus), dim=1)
-            batch_size = imgs.shape[0]
+            pos2ds = pos2ds.cuda().float()
+            pos3ds = pos3ds.cuda().float()
+            batch_size = pos2ds.shape[0]
             
+            #pos3ds_in = pos3ds[:,:-1,...]
+            pos3ds_out = pos3ds[:,1:,...]
+
             with torch.cuda.amp.autocast():
-                preds = self.model(imgs)
-                loss = self.criterion(preds,hmaps)
+                #preds = self.model(pos2ds, pos3ds_in)
+                preds = self.model(pos2ds)
+                loss = self.criterion(preds,pos3ds_out)
 
             mse_loss.update(loss.detach().item(), batch_size)
             self.scaler.scale(loss).backward()
@@ -197,13 +210,12 @@ class Fitter:
             
             
 class TrainGlobalConfig:
-    num_workers = 8
-    batch_size = 2 * torch.cuda.device_count()
-    n_epochs = 80
-    lr = 0.0002
+    num_workers = args.num_workers
+    batch_size = args.batch_size * torch.cuda.device_count()
+    n_epochs = args.n_epochs
 
-    folder = 'UniPose-80-1e-2-sigma1'
-    
+    folder = args.output_path
+    lr = args.max_lr
 
     # -------------------
     verbose = True
@@ -214,27 +226,26 @@ class TrainGlobalConfig:
     step_scheduler = True  # do scheduler.step after optimizer.step
     validation_scheduler = False  # do scheduler.step after validation stage loss
 
-    SchedulerClass = torch.optim.lr_scheduler.OneCycleLR
+    SchedulerClass = torch.optim.lr_scheduler.OneCycleLR #ReduceLROnPlateau
     scheduler_params = dict(
-        max_lr=1e-2,
+        #patience=10,
+        #factor=0.1,
+        max_lr=args.max_lr,
         #total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
         epochs=n_epochs,
         steps_per_epoch=int(len(train_dataset) / batch_size),
-        pct_start=0.2,
-        anneal_strategy='cos', 
-        final_div_factor=10**5
+        pct_start=args.pct_start,
+        anneal_strategy=args.anneal_strategy, 
+        final_div_factor=args.final_div_factor
     )
     
-    
-net = UniPose(dataset='human3.6m',num_classes=17).cuda()
-#net = OpenPose().cuda()
-
-def count_parameters_in_MB(model):
-    return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name) / 1e6
-
-print(count_parameters_in_MB(net))
-
-#net = net.cuda()
+if args.model == 'gcn_trans':
+    #net = GCNLSTM(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=128).cuda()
+    net = GCNTransformer(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=128).cuda()
+elif args.model == 'trans':
+    net = PureTransformer(128).cuda()
+elif args.model == 'gcn_trans_enc':
+    net = GCNTransformerModel(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=128).cuda()
 
 def run_training():
     device = torch.device('cuda')
@@ -259,6 +270,7 @@ def run_training():
 
     fitter = Fitter(model=net, device=device, config=TrainGlobalConfig)
     #fitter.load(f'{fitter.base_dir}/last-checkpoint.bin')
+    #fitter.load('/home/zpengac/pose/EFARS/estimator/checkpoints/GCNTransformer-60-1e-4/last-checkpoint.bin')
     fitter.fit(train_loader, val_loader)
     
     

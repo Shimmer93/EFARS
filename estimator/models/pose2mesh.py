@@ -1,5 +1,6 @@
 # Credit: https://github.com/hongsukchoi/Pose2Mesh_RELEASE/blob/master/lib/models/posenet.py
 
+import torch
 import torch.nn as nn
 #from core.config import cfg as cfg
 #from funcs_utils import load_checkpoint
@@ -9,6 +10,13 @@ def weight_init(m):
     if isinstance(m, nn.Linear):
         nn.init.kaiming_normal(m.weight)
 
+def load_checkpoint(load_dir, epoch=0, pick_best=False):
+    try:
+        print(f"Fetch model weight from {load_dir}")
+        checkpoint = torch.load(load_dir, map_location='cpu')
+        return checkpoint
+    except Exception as e:
+        raise ValueError("No checkpoint exists!\n", e)
 
 class Linear(nn.Module):
     def __init__(self, linear_size, p_dropout=0.5):
@@ -89,14 +97,14 @@ class PoseNet(nn.Module):
         return y.reshape((y.shape[0], y.shape[1]//3, 3))
 
     def _load_pretrained_model(self):
-        pass
-        #print("Loading pretrained posenet...")
-        #checkpoint = load_checkpoint(load_dir=cfg.MODEL.posenet_path, pick_best=True)
-        #self.load_state_dict(checkpoint['model_state_dict'])
+        #pass
+        print("Loading pretrained posenet...")
+        checkpoint = load_checkpoint(load_dir='/home/zpengac/pose/EFARS/estimator/best.pth.tar', pick_best=True)
+        self.load_state_dict(checkpoint['model_state_dict'])
 
 if __name__ == '__main__':
     import torch
-    m = PoseNet(num_joint=17)
+    m = PoseNet(num_joint=17, pretrained=True)
     x = torch.randn(2,17,2)
     y = m(x)
     print(y.shape)

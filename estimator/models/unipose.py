@@ -398,7 +398,11 @@ class UniPose(nn.Module):
 
 if __name__ == '__main__':
     m = UniPose(dataset='human3.6m',num_classes=17)
-    m.eval()
+    #m.eval()
     x = torch.randn(2,3,256,256)
     y = m(x)
     print(y.shape)
+    ysum = y.sum(axis=1).unsqueeze(1)
+    print(ysum.shape)
+    yy = torch.cat((y,ysum),dim=1)
+    print(yy.shape)
