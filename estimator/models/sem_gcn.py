@@ -287,6 +287,119 @@ class GCNLSTM(nn.Module):
         for _, param in self.fc2.named_parameters():
             nn.init.uniform_(param, -0.1, 0.1)
 
+class Linear(nn.Module):
+    def __init__(self, linear_size, p_dropout=0.5):
+        super(Linear, self).__init__()
+        self.l_size = linear_size
+
+        self.relu = nn.ReLU(inplace=True)
+        self.dropout = nn.Dropout(p_dropout)
+
+        self.w1 = nn.Linear(self.l_size, self.l_size)
+        self.batch_norm1 = nn.BatchNorm1d(self.l_size)
+
+        self.w2 = nn.Linear(self.l_size, self.l_size)
+        self.batch_norm2 = nn.BatchNorm1d(self.l_size)
+
+    def forward(self, x):
+        y = self.batch_norm1(x)
+        y = self.relu(y)
+        y = self.dropout(y)
+        y = self.w1(y)
+
+        y = self.batch_norm2(y)
+        y = self.relu(y)
+        y = self.dropout(y)
+        y = self.w2(y)
+
+        out = x + y
+
+        return out
+
+class MLP(nn.Module):
+    def __init__(self,
+                 num_joint=17,
+                 linear_size=4096,
+                 num_stage=2,
+                 p_dropout=0.5,
+                 pretrained=False):
+        super(MLP, self).__init__()
+
+        self.linear_size = linear_size
+        self.p_dropout = p_dropout
+        self.num_stage = num_stage
+
+        # 2d joints
+        self.input_size =  num_joint * 2
+        # 3d joints
+        self.output_size = num_joint * 3
+
+        # process input to linear size
+        self.w1 = nn.Linear(self.input_size, self.linear_size)
+        self.batch_norm1 = nn.BatchNorm1d(self.linear_size)
+
+        self.linear_stages = []
+        for l in range(num_stage):
+            self.linear_stages.append(Linear(self.linear_size, self.p_dropout))
+        self.linear_stages = nn.ModuleList(self.linear_stages)
+
+        # post processing
+        self.w2 = nn.Linear(self.linear_size, self.output_size)
+
+        self.relu = nn.ReLU(inplace=True)
+        self.dropout = nn.Dropout(self.p_dropout)
+
+        if pretrained:
+            self._load_pretrained_model()
+
+    def forward(self, x):
+        # pre-processing
+        y = self.w1(x.reshape((x.shape[0], -1)))
+
+        # linear layers
+        for i in range(self.num_stage):
+            y = self.linear_stages[i](y)
+
+        y = self.w2(y)
+
+        return y.reshape((y.shape[0], y.shape[1]//3, 3))
+
+class MLPLSTM(nn.Module):
+    def __init__(self, hid_dim):
+        super(MLPLSTM, self).__init__()
+        self.mlp = MLP()
+        self.lstm = nn.LSTM(input_size=51, hidden_size=hid_dim, num_layers=3, batch_first=True, bidirectional=True)
+        self.fc1 = nn.Linear(hid_dim * 2, hid_dim * 2)
+        self.fc2 = nn.Linear(hid_dim * 2, 51)
+        self.hid_dim = hid_dim
+
+        self.init_params()
+
+    def forward(self, xs):
+        b, t, n, _ = xs.shape
+        ys = []
+        for i in range(t):
+            y = self.mlp(xs[:,i,:,:])
+            ys.append(y)
+        ys = torch.stack(ys, dim=1)
+        ys = ys.reshape(b, t, n * 3)
+        out, _ = self.lstm(ys)
+        out = out.reshape(b * t, self.hid_dim * 2)
+        out = self.fc1(out).relu()
+        out = self.fc2(out)
+        out = out.reshape(b, t, n, 3)
+        return out
+
+    def init_params(self):
+        for _, param in self.lstm.named_parameters():
+            nn.init.uniform_(param, -0.1, 0.1)
+
+        for _, param in self.fc1.named_parameters():
+            nn.init.uniform_(param, -0.1, 0.1)
+
+        for _, param in self.fc2.named_parameters():
+            nn.init.uniform_(param, -0.1, 0.1)
+
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=100):
         super(PositionalEncoding, self).__init__()
@@ -392,10 +505,10 @@ class GCNTransformerModel(nn.Module):
     def __init__(self, adj, hid_dim, coords_dim=(2, 3), num_layers=4, nodes_group=None, p_dropout=None):
         super(GCNTransformerModel, self).__init__()
         self.gcn = SemGCN(adj, hid_dim, coords_dim, num_layers, nodes_group, p_dropout)
-        encoder_layers = nn.TransformerEncoderLayer(d_model=hid_dim, nhead=8, batch_first=True)
+        encoder_layers = nn.TransformerEncoderLayer(d_model=hid_dim, nhead=8, batch_first=True, dropout=0.1)
         self.encoder = nn.TransformerEncoder(encoder_layers, 6)
         
-        self.fc1 = nn.Linear(51, hid_dim)
+        self.fc1 = nn.Linear(17 * hid_dim, hid_dim)
         self.fc2 = nn.Linear(hid_dim, 51)
         self.pos_enc = PositionalEncoding(hid_dim)
         self.hid_dim = hid_dim
@@ -407,12 +520,12 @@ class GCNTransformerModel(nn.Module):
         ys = []
         for i in range(t):
             y = self.gcn(xs[:,i,:,:])
+            y = self.fc1(y.reshape(b, n * self.hid_dim))
             ys.append(y)
         ys = torch.stack(ys, dim=1)
-        ys = ys.reshape(b * t, n * 3)
-        ys = self.fc1(ys)
-        ys = ys.reshape(b, t, self.hid_dim) * math.sqrt(self.hid_dim)
-        ys = self.pos_enc(ys)
+        #print(ys.shape)
+        #ys = ys.reshape(b, t, self.hid_dim)# * math.sqrt(self.hid_dim)
+        #ys = self.pos_enc(ys)
         ys = self.encoder(ys)
         out = self.fc2(ys)
         out = out.reshape(b, t, n, 3)
@@ -423,6 +536,77 @@ class GCNTransformerModel(nn.Module):
         nn.init.uniform_(self.fc1.weight, -0.1, 0.1)
         nn.init.zeros_(self.fc2.bias)
         nn.init.uniform_(self.fc2.weight, -0.1, 0.1)
+
+class MLPTransformerModel(nn.Module):
+    def __init__(self, hid_dim):
+        super(MLPTransformerModel, self).__init__()
+        self.mlp = MLP()
+        encoder_layers = nn.TransformerEncoderLayer(d_model=hid_dim, nhead=8, batch_first=True, dropout=0.1)
+        self.encoder = nn.TransformerEncoder(encoder_layers, 6)
+        
+        self.fc1 = nn.Linear(17 * hid_dim, hid_dim)
+        self.fc2 = nn.Linear(hid_dim, 51)
+        self.pos_enc = PositionalEncoding(hid_dim)
+        self.hid_dim = hid_dim
+
+        self.init_params()
+
+    def forward(self, xs):
+        b, t, n, _ = xs.shape
+        ys = []
+        for i in range(t):
+            y = self.mlp(xs[:,i,:,:])
+            y = self.fc1(y.reshape(b, n * self.hid_dim))
+            ys.append(y)
+        ys = torch.stack(ys, dim=1)
+        #print(ys.shape)
+        #ys = ys.reshape(b, t, self.hid_dim)# * math.sqrt(self.hid_dim)
+        #ys = self.pos_enc(ys)
+        ys = self.encoder(ys)
+        out = self.fc2(ys)
+        out = out.reshape(b, t, n, 3)
+        return out
+
+    def init_params(self):
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.uniform_(self.fc1.weight, -0.1, 0.1)
+        nn.init.zeros_(self.fc2.bias)
+        nn.init.uniform_(self.fc2.weight, -0.1, 0.1)
+
+class PureTransformerModel(nn.Module):
+    def __init__(self, hid_dim):
+        super(PureTransformerModel, self).__init__()
+        encoder_layers = nn.TransformerEncoderLayer(d_model=hid_dim, nhead=8, batch_first=True, dropout=0.1)
+        self.encoder = nn.TransformerEncoder(encoder_layers, 6)
+        
+        self.fc1 = nn.Linear(34, hid_dim)
+        #self.fc2 = nn.Linear(hid_dim, hid_dim)
+        self.fc2 = nn.Linear(hid_dim, 51)
+        self.pos_enc = PositionalEncoding(hid_dim)
+        self.hid_dim = hid_dim
+
+        self.init_params()
+
+    def forward(self, xs):
+        b, t, n, _ = xs.shape
+        ys = xs.reshape(b * t, n * 2)
+        ys = self.fc1(ys)
+        #ys = self.fc2(ys)
+        ys = ys.reshape(b, t, self.hid_dim) * math.sqrt(self.hid_dim)
+        ys = self.pos_enc(ys)
+        ys = self.encoder(ys)
+        out = self.fc2(ys)#.relu()
+        #out = self.fc3(out)
+        out = out.reshape(b, t, n, 3)
+        return out
+
+    def init_params(self):
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.uniform_(self.fc1.weight, -0.1, 0.1)
+        nn.init.zeros_(self.fc2.bias)
+        nn.init.uniform_(self.fc2.weight, -0.1, 0.1)
+        #nn.init.zeros_(self.fc3.bias)
+        #nn.init.uniform_(self.fc3.weight, -0.1, 0.1)
 
 if __name__ == '__main__':
     import torch

@@ -30,6 +30,6 @@ class CNNLSTM(nn.Module):
 
 if __name__ == '__main__':
     m = CNNLSTM(num_classes=14)
-    x = torch.randn(2,2,3,128,128)
+    x = torch.randn(2,5,3,128,128)
     y = m(x)
     print(y.shape)

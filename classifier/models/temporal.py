@@ -372,6 +372,6 @@ class SqueezeNet(nn.Module):
 
 if __name__ == '__main__':
     m = ShuffleNetV2(num_classes=14, sample_size=128)
-    x = torch.randn(2,3,2,128,128)
+    x = torch.randn(2,3,5,128,128)
     y = m(x)
     print(y.shape)

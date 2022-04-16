@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(1, '/home/zpengac/pose/EFARS/')
+sys.path.insert(1, '/home/samuel/EFARS/')
 
 import torch
 import torch.nn as nn
@@ -13,9 +13,9 @@ from datetime import datetime
 import time
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
-from models.sem_gcn import SemGCN, GCNLSTM, GCNTransformer, PureTransformer, GCNTransformerModel
+from models.sem_gcn import SemGCN, GCNLSTM, GCNTransformer, PureTransformer, GCNTransformerModel, PureTransformerModel, MLPLSTM, MLPTransformerModel
 from models.pose2mesh import PoseNet
-from models.simple_graph import GCN
+#from models.simple_graph import GCN
 from data.human36m import Human36M2DTo3DTemporalDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything
 from utils.graph import adj_mx_from_edges
@@ -25,8 +25,8 @@ from utils.parser import args
 
 seed_everything(args.seed)
 
-root_path = '/scratch/PI/cqf/datasets/h36m'
-img_path = root_path + '/img'
+root_path = '/home/samuel/h36m'
+img_path = root_path + '/imgs'
 pos2d_path = root_path + '/pos2d'
 pos3d_path = root_path + '/pos3d'
 
@@ -44,7 +44,7 @@ class Fitter:
         self.config = config
         self.epoch = 0
 
-        self.base_dir = f'/home/zpengac/pose/EFARS/estimator/checkpoints/{config.folder}'
+        self.base_dir = f'/home/samuel/EFARS/estimator/checkpoints/{config.folder}'
         if not os.path.exists(self.base_dir):
             os.makedirs(self.base_dir)
         
@@ -55,7 +55,7 @@ class Fitter:
         if torch.cuda.device_count() > 1:
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-            self.model = nn.DataParallel(self.model, device_ids=[0,1,2,3,4,5,6,7])
+            self.model = nn.DataParallel(self.model, device_ids=[0,1])
         self.device = device
 
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.lr)
@@ -155,7 +155,7 @@ class Fitter:
             with torch.cuda.amp.autocast():
                 #preds = self.model(pos2ds, pos3ds_in)
                 preds = self.model(pos2ds)
-                loss = self.criterion(preds,pos3ds_out)
+                loss = self.criterion(preds,pos3ds_out) + 0.000001 * l2_norm(self.model)
 
             mse_loss.update(loss.detach().item(), batch_size)
             self.scaler.scale(loss).backward()
@@ -197,17 +197,19 @@ class Fitter:
     def load(self, path):
         checkpoint = torch.load(path)
         self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        self.best_summary_loss = checkpoint['best_summary_loss']
-        self.epoch = checkpoint['epoch'] + 1
+        #self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        #self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        #self.best_summary_loss = checkpoint['best_summary_loss']
+        #self.epoch = checkpoint['epoch'] + 1
         
     def log(self, message):
         if self.config.verbose:
             print(message)
         with open(self.log_path, 'a+') as logger:
             logger.write(f'{message}\n')
-            
+
+def l2_norm(model):
+    return sum(p.pow(2.0).sum() for p in model.parameters())            
             
 class TrainGlobalConfig:
     num_workers = args.num_workers
@@ -216,6 +218,8 @@ class TrainGlobalConfig:
 
     folder = args.output_path
     lr = args.max_lr
+
+    l2_lambda = 0.001
 
     # -------------------
     verbose = True
@@ -226,9 +230,9 @@ class TrainGlobalConfig:
     step_scheduler = True  # do scheduler.step after optimizer.step
     validation_scheduler = False  # do scheduler.step after validation stage loss
 
-    SchedulerClass = torch.optim.lr_scheduler.OneCycleLR #ReduceLROnPlateau
+    SchedulerClass = torch.optim.lr_scheduler.OneCycleLR # #OneCycleLR #. #. # #ReduceLROnPlateau
     scheduler_params = dict(
-        #patience=10,
+        #patience=5,
         #factor=0.1,
         max_lr=args.max_lr,
         #total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
@@ -241,11 +245,17 @@ class TrainGlobalConfig:
     
 if args.model == 'gcn_trans':
     #net = GCNLSTM(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=128).cuda()
-    net = GCNTransformer(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=128).cuda()
+    net = GCNTransformer(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=args.hid_dim).cuda()
 elif args.model == 'trans':
-    net = PureTransformer(128).cuda()
+    net = PureTransformer(args.hid_dim).cuda()
 elif args.model == 'gcn_trans_enc':
-    net = GCNTransformerModel(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=128).cuda()
+    net = GCNTransformerModel(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=args.hid_dim).cuda()
+elif args.model == 'trans_enc':
+    net = PureTransformerModel(args.hid_dim).cuda()
+elif args.model == 'gcn_lstm':
+    net = GCNLSTM(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=args.hid_dim).cuda()
+elif args.model == 'mlp_lstm':
+    net = MLPLSTM(args.hid_dim).cuda()
 
 def run_training():
     device = torch.device('cuda')
@@ -270,7 +280,7 @@ def run_training():
 
     fitter = Fitter(model=net, device=device, config=TrainGlobalConfig)
     #fitter.load(f'{fitter.base_dir}/last-checkpoint.bin')
-    #fitter.load('/home/zpengac/pose/EFARS/estimator/checkpoints/GCNTransformer-60-1e-4/last-checkpoint.bin')
+    #fitter.load('/home/samuel/EFARS/estimator/checkpoints/MLPLSTM-80-1e-4-dim512-continue/best-checkpoint-013epoch.bin')
     fitter.fit(train_loader, val_loader)
     
     

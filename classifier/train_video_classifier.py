@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(1, '/home/zpengac/pose/EFARS/')
+sys.path.insert(1, '/home/samuel/EFARS/')
 
 import torch
 import torch.nn as nn
@@ -12,40 +12,79 @@ import random
 from datetime import datetime
 import time
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
+from torch.utils.data import random_split
+from torchvision.datasets import HMDB51
+import torchvision.transforms as T
 
 #from models.torchvision_models import ResNet18, ResNet50, MobileNetV3Small
 from models.lstm import CNNLSTM
 from models.gcn import GCNClassifier
 from models.temporal import ShuffleNetV2, MobileNetV2, SqueezeNet
+from models.timesformer.vit import TimeSformer
 
 from data.human36m import Human36M2DTemporalDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything
 from utils.transform import do_pos2d_train_transforms, do_pos2d_val_transforms
 from utils.graph import adj_mx_from_edges
+from utils.parser import args
 
-seed_everything(1120)
+seed_everything(args.seed)
 
-root_path = '/scratch/PI/cqf/datasets/h36m'
-img_path = root_path + '/img'
-pos2d_path = root_path + '/pos2d'
+#root_path = '/scratch/PI/cqf/datasets/h36m'
+#img_path = root_path + '/img'
+#pos2d_path = root_path + '/pos2d'
 
-img_fns = glob(img_path+'/*.jpg')
-split = int(0.8*len(img_fns))
-random.shuffle(img_fns)
-train_fns = img_fns[:10000]
-val_fns = img_fns[10000:12000]
+#img_fns = glob(img_path+'/*.jpg')
+#split = int(0.8*len(img_fns))
+#random.shuffle(img_fns)
+#train_fns = img_fns[:10000]
+#val_fns = img_fns[10000:12000]
+
+root_path = '/home/samuel/hmdb51/videos'
+annot_path = '/home/samuel/hmdb51/annots'
 
 # TODO: transforms
 
-train_dataset = Human36M2DTemporalDataset(train_fns, pos2d_path, transforms=do_pos2d_train_transforms, mode='C')
-val_dataset = Human36M2DTemporalDataset(val_fns, pos2d_path, transforms=do_pos2d_val_transforms, mode='C')
+#train_dataset = Human36M2DTemporalDataset(train_fns, pos2d_path, transforms=do_pos2d_train_transforms, mode='C')
+#val_dataset = Human36M2DTemporalDataset(val_fns, pos2d_path, transforms=do_pos2d_val_transforms, mode='C')
+
+train_transforms = T.Compose([
+    T.Lambda(lambda tensor: tensor.permute(0, 3, 1, 2)),
+    T.ConvertImageDtype(torch.float32),
+    T.Normalize(mean=[0.43216, 0.394666, 0.37645], std=[0.22803, 0.22145, 0.216989]),
+    T.Resize((128,171)),
+    T.RandomCrop((112,112)),
+    T.Lambda(lambda tensor: tensor.permute(0, 2, 3, 1))
+])
+
+valid_transforms = T.Compose([
+    T.Lambda(lambda tensor: tensor.permute(0, 3, 1, 2)),
+    T.ConvertImageDtype(torch.float32),
+    T.Normalize(mean=[0.43216, 0.394666, 0.37645], std=[0.22803, 0.22145, 0.216989]),
+    T.Resize((128,171)),
+    T.CenterCrop((112,112)),
+    T.Lambda(lambda tensor: tensor.permute(0, 2, 3, 1))
+])
+
+total_dataset = HMDB51(root=root_path, annotation_path=annot_path, frames_per_clip=8, transform=train_transforms,
+                       step_between_clips=5, fold=1, train=True, num_workers=args.num_workers)
+#valid_dataset = HMDB51(root=root_path, annotation_path=annot_path, frames_per_clip=8, transform=valid_transforms,
+#                       step_between_clips=5, fold=1, train=False, num_workers=args.num_workers)
+
+#imgs, _, label = train_dataset[0]
+#print(imgs.shape)
+
+num_total_samples = len(total_dataset)
+num_valid_samples = int(0.2 * num_total_samples)
+
+train_dataset, valid_dataset = random_split(total_dataset, [num_total_samples-num_valid_samples, num_valid_samples])
 
 class Fitter:
     def __init__(self, model, device, config):
         self.config = config
         self.epoch = 0
 
-        self.base_dir = f'/home/zpengac/pose/EFARS/estimator/checkpoints/{config.folder}'
+        self.base_dir = f'/home/samuel/EFARS/classifier/checkpoints/{config.folder}'
         if not os.path.exists(self.base_dir):
             os.makedirs(self.base_dir)
         
@@ -113,7 +152,7 @@ class Fitter:
         ce_loss = AverageMeter()
         accuracy = AverageMeter()
         t = time.time()
-        for step, (imgs, labels) in enumerate(val_loader):
+        for step, (imgs, _, labels) in enumerate(val_loader):
             if self.config.verbose:
                 if step % self.config.verbose_step == 0:
                     print(
@@ -125,7 +164,10 @@ class Fitter:
 
             with torch.no_grad():
                 imgs = imgs.cuda().float()
-                imgs = imgs.transpose(1,2)
+                if args.model == 'cnnlstm':
+                    imgs = imgs.permute((0, 1, 4, 2, 3))
+                else:
+                    imgs = imgs.permute((0, 4, 1, 2, 3))
                 #skeletons = skeletons.cuda().float()
                 labels = labels.cuda()
                 batch_size = imgs.shape[0]
@@ -146,7 +188,7 @@ class Fitter:
         ce_loss = AverageMeter()
         accuracy = AverageMeter()
         t = time.time()
-        for step, (imgs, labels) in enumerate(train_loader):
+        for step, (imgs, _, labels) in enumerate(train_loader):
             if self.config.verbose:
                 if step % self.config.verbose_step == 0:
                     print(
@@ -156,7 +198,10 @@ class Fitter:
                         f'time: {(time.time() - t):.5f}', end='\r'
                     )
             imgs = imgs.cuda().float()
-            imgs = imgs.transpose(1,2)
+            if args.model == 'cnnlstm':
+                imgs = imgs.permute((0, 1, 4, 2, 3))
+            else:
+                imgs = imgs.permute((0, 4, 1, 2, 3))
             #skeletons = skeletons.cuda().float()
             labels = labels.cuda()
             batch_size = imgs.shape[0]
@@ -221,12 +266,12 @@ class Fitter:
             
             
 class TrainGlobalConfig:
-    num_workers = 8
-    batch_size = 2 * torch.cuda.device_count()
-    n_epochs = 60 
-    lr = 0.0002
+    num_workers = args.num_workers
+    batch_size = args.batch_size * torch.cuda.device_count()
+    n_epochs = args.n_epochs
 
-    folder = 'MobileNet-60-1e-4'
+    folder = args.output_path
+    lr = args.max_lr
     
 
     # -------------------
@@ -235,23 +280,30 @@ class TrainGlobalConfig:
     # -------------------
 
     # --------------------
-    step_scheduler = True  # do scheduler.step after optimizer.step
-    validation_scheduler = False  # do scheduler.step after validation stage loss
+    step_scheduler = False  # do scheduler.step after optimizer.step
+    validation_scheduler = True  # do scheduler.step after validation stage loss
 
-    SchedulerClass = torch.optim.lr_scheduler.OneCycleLR
+    SchedulerClass = torch.optim.lr_scheduler.ReduceLROnPlateau #OneCycleLR ReduceLROnPlateau
     scheduler_params = dict(
-        max_lr=1e-4,
+        patience = 5,
+        factor = 0.1,
+        #max_lr=args.max_lr,
         #total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
-        epochs=n_epochs,
-        steps_per_epoch=int(len(train_dataset) / batch_size),
-        pct_start=0.3,
-        anneal_strategy='cos', 
-        final_div_factor=10**5
+        #epochs=n_epochs,
+        #steps_per_epoch=int(len(train_dataset) / batch_size),
+        #pct_start=args.pct_start,
+        #anneal_strategy=args.anneal_strategy, 
+        #final_div_factor=args.final_div_factor
     )
     
 #net = ResNet18(num_classes=14, pretrained=True).cuda()
 #net = CNNLSTM(num_classes=14).cuda()
-net = MobileNetV2(num_classes=14, sample_size=256).cuda()
+if args.model == 'mobilenetv2':
+    net = MobileNetV2(num_classes=26, sample_size=112).cuda()
+elif args.model == 'cnnlstm':
+    net = CNNLSTM(num_classes=26).cuda()
+elif args.model == 'timesformer':
+    net = TimeSformer(img_size=112, num_classes=26, num_frames=8).cuda()
 #net = GCNClassifier(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), hid_dim=128).cuda()
 
 def run_training():
@@ -260,18 +312,18 @@ def run_training():
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=TrainGlobalConfig.batch_size,
-        sampler=SequentialSampler(train_dataset),
+        sampler=RandomSampler(train_dataset),
         pin_memory=False,
         drop_last=True,
         num_workers=TrainGlobalConfig.num_workers,
     )
 
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, 
+        valid_dataset, 
         batch_size=TrainGlobalConfig.batch_size,
         num_workers=TrainGlobalConfig.num_workers,
         shuffle=False,
-        sampler=SequentialSampler(val_dataset),
+        sampler=SequentialSampler(valid_dataset),
         pin_memory=False,
     )
 

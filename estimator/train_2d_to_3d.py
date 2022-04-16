@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(1, '/home/zpengac/pose/EFARS/')
+sys.path.insert(1, '/home/samuel/EFARS/')
 
 import torch
 import torch.nn as nn
@@ -15,7 +15,7 @@ from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
 from models.sem_gcn import SemGCN
 from models.pose2mesh import PoseNet
-from models.simple_graph import GCN
+#from models.simple_graph import GCN
 from data.human36m import Human36M2DTo3DDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything
 from utils.graph import adj_mx_from_edges
@@ -25,16 +25,16 @@ from utils.parser import args
 
 seed_everything(args.seed)
 
-root_path = '/scratch/PI/cqf/datasets/h36m'
-img_path = root_path + '/img'
+root_path = '/home/samuel/h36m'
+img_path = root_path + '/imgs'
 pos2d_path = root_path + '/pos2d'
 pos3d_path = root_path + '/pos3d'
 
-img_fns = glob(img_path+'/*.jpg')
+img_fns = glob(img_path+'/S[0-9]_*.jpg')
 split = int(0.8*len(img_fns))
 random.shuffle(img_fns)
-train_fns = img_fns[:10000]
-val_fns = img_fns[10000:12000]
+train_fns = img_fns[:20000]
+val_fns = img_fns[20000:24000]
 
 train_dataset = Human36M2DTo3DDataset(train_fns, pos2d_path, pos3d_path, transforms=do_2d_to_3d_transforms)
 val_dataset = Human36M2DTo3DDataset(val_fns, pos2d_path, pos3d_path, transforms=do_2d_to_3d_transforms)
@@ -44,7 +44,7 @@ class Fitter:
         self.config = config
         self.epoch = 0
 
-        self.base_dir = f'/home/zpengac/pose/EFARS/estimator/checkpoints/{config.folder}'
+        self.base_dir = f'/home/samuel/EFARS/estimator/checkpoints/{config.folder}'
         if not os.path.exists(self.base_dir):
             os.makedirs(self.base_dir)
         
@@ -55,7 +55,7 @@ class Fitter:
         if torch.cuda.device_count() > 1:
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-            self.model = nn.DataParallel(self.model, device_ids=[0,1,2,3,4,5,6,7])
+            self.model = nn.DataParallel(self.model, device_ids=[0,1])
         self.device = device
 
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.lr)
@@ -124,9 +124,6 @@ class Fitter:
             mse_loss.update(loss.detach().item(), batch_size)
             #self.scaler.scale(loss).backward()
 
-        if self.config.step_scheduler:
-            self.scheduler.step(loss)
-
         return mse_loss
 
     def train_one_epoch(self, train_loader):
@@ -158,8 +155,8 @@ class Fitter:
             #self.optimizer.step()
             self.scaler.step(self.optimizer) # native fp16
             
-            #if self.config.step_scheduler:
-            #    self.scheduler.step()
+            if self.config.step_scheduler:
+                self.scheduler.step()
             
             self.scaler.update() #native fp16
                 
@@ -215,15 +212,15 @@ class TrainGlobalConfig:
     # -------------------
 
     # --------------------
-    step_scheduler = True  # do scheduler.step after optimizer.step
-    validation_scheduler = False  # do scheduler.step after validation stage loss
+    step_scheduler = False  # do scheduler.step after optimizer.step
+    validation_scheduler = True  # do scheduler.step after validation stage loss
 
-    SchedulerClass = torch.optim.lr_scheduler.ReduceLROnPlateau
+    SchedulerClass = torch.optim.lr_scheduler.ReduceLROnPlateau #OneCycleLR #ReduceLROnPlateau
     scheduler_params = dict(
         patience=5,
         factor=0.1,
         #max_lr=args.max_lr,
-        #total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
+        ##total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
         #epochs=n_epochs,
         #steps_per_epoch=int(len(train_dataset) / batch_size),
         #pct_start=args.pct_start,
@@ -237,7 +234,7 @@ if args.model == 'sem_gcn':
 elif args.model == 'gcn':
     #edge_index = adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False)
     edges = torch.tensor(Human36MMetadata.skeleton_edges, dtype=torch.long).T
-    net = GCN(edge_index=edges.cuda(), hidden_channels=128).cuda()
+    #net = GCN(edge_index=edges.cuda(), hidden_channels=128).cuda()
 elif args.model == 'pose2mesh':
     net = PoseNet(num_joint=17).cuda()
 
