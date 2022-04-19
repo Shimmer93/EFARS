@@ -232,10 +232,10 @@ class Fitter:
     def load(self, path):
         checkpoint = torch.load(path)
         self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        self.best_summary_loss = checkpoint['best_summary_loss']
-        self.epoch = checkpoint['epoch'] + 1
+        #self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        #self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        #self.best_summary_loss = checkpoint['best_summary_loss']
+        #self.epoch = checkpoint['epoch'] + 1
         
     def log(self, message):
         if self.config.verbose:
@@ -259,20 +259,20 @@ class TrainGlobalConfig:
     # -------------------
 
     # --------------------
-    step_scheduler = False  # do scheduler.step after optimizer.step
-    validation_scheduler = True  # do scheduler.step after validation stage loss
+    step_scheduler = True  # do scheduler.step after optimizer.step
+    validation_scheduler = False  # do scheduler.step after validation stage loss
 
-    SchedulerClass = torch.optim.lr_scheduler.ReduceLROnPlateau #OneCycleLR ReduceLROnPlateau
+    SchedulerClass = torch.optim.lr_scheduler.OneCycleLR #OneCycleLR ReduceLROnPlateau
     scheduler_params = dict(
-        patience = 5,
-        factor = 0.1,
-        #max_lr=args.max_lr,
+        #patience = 5,
+        #factor = 0.1,
+        max_lr=args.max_lr,
         #total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
-        #epochs=n_epochs,
-        #steps_per_epoch=int(len(train_dataset) / batch_size),
-        #pct_start=args.pct_start,
-        #anneal_strategy=args.anneal_strategy, 
-        #final_div_factor=args.final_div_factor
+        epochs=n_epochs,
+        steps_per_epoch=int(len(train_dataset) / batch_size),
+        pct_start=args.pct_start,
+        anneal_strategy=args.anneal_strategy, 
+        final_div_factor=args.final_div_factor
     )
     
 #net = ResNet18(num_classes=14, pretrained=True).cuda()
@@ -309,7 +309,7 @@ def run_training():
     )
 
     fitter = Fitter(model=net, device=device, config=TrainGlobalConfig)
-    #fitter.load(f'{fitter.base_dir}/last-checkpoint.bin')
+    fitter.load('/home/samuel/EFARS/classifier/checkpoints/ST-GCN-20-1e-2/best-checkpoint-003epoch.bin')
     fitter.fit(train_loader, val_loader)
     
     

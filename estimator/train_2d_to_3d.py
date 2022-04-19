@@ -103,7 +103,7 @@ class Fitter:
         self.model.eval()
         mse_loss = AverageMeter()
         t = time.time()
-        for step, (pos2ds, pos3ds, _) in enumerate(val_loader):
+        for step, (pos2ds, pos3ds, _, _, _) in enumerate(val_loader):
             if self.config.verbose:
                 if step % self.config.verbose_step == 0:
                     print(
@@ -130,7 +130,7 @@ class Fitter:
         self.model.train()
         mse_loss = AverageMeter()
         t = time.time()
-        for step, (pos2ds, pos3ds, _) in enumerate(train_loader):
+        for step, (pos2ds, pos3ds, _, _, _) in enumerate(train_loader):
             if self.config.verbose:
                 if step % self.config.verbose_step == 0:
                     print(

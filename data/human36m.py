@@ -201,13 +201,13 @@ class Human36M2DTo3DDataset(Human36MBaseDataset):
         project_matrix = get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
         skeleton_2d = project_pos3d_to_pos2d(skeleton_3d, project_matrix)
         skeleton_2d = normalize_screen_coordinates(skeleton_2d, 1000, 1000)
-        #R, t = get_camera(self.camera_parameters, subset, action.split('.')[1])
+        R, t = get_camera(self.camera_parameters, subset, action.split('.')[1])
         #skeleton_3d = skeleton_3d @ R + t
         skeleton_3d = skeleton_3d / 1000
         skeleton_3d[:,:] -= skeleton_3d[:1,:]
         #camera = normalize_camera(camera, (1000, 1000))
         #skeleton_3d = transform_pos3d(skeleton_3d, camera)
-        return torch.from_numpy(skeleton_2d), torch.from_numpy(skeleton_3d), project_matrix
+        return torch.from_numpy(skeleton_2d), torch.from_numpy(skeleton_3d), project_matrix, R, t
 
 class Human36M2DTemporalDataset(Human36MBaseDataset):
     def __init__(self, img_fns, skeleton_2d_dir, transforms=None, crop_size=(512, 512), out_size=(256,256), downsample=8, sigma=3, mode='E', length=5):
@@ -276,6 +276,8 @@ class Human36M2DTo3DTemporalDataset(Human36MBaseDataset):
                 project_matrix = get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
                 skeleton_2d = project_pos3d_to_pos2d(skeleton_3d, project_matrix)
                 skeleton_2d = normalize_screen_coordinates(skeleton_2d, 1000, 1000)
+                R, t = get_camera(self.camera_parameters, subset, action.split('.')[1])
+                #skeleton_3d = (skeleton_3d - t) @ R.T
                 skeleton_3d /= 1000
                 skeleton_3d[:,:] -= skeleton_3d[:1,:]
             else:
@@ -287,10 +289,12 @@ class Human36M2DTo3DTemporalDataset(Human36MBaseDataset):
     
         skeleton_2d_seq = np.stack(skeleton_2d_seq)
         skeleton_3d_seq = np.stack(skeleton_3d_seq)
-        zeros = np.zeros_like(skeleton_3d_seq[0:1,...])
-        skeleton_3d_seq = np.concatenate([zeros, skeleton_3d_seq], axis=0)
+        #zeros = np.zeros_like(skeleton_3d_seq[0:1,...])
+        #skeleton_3d_seq = np.concatenate([zeros, skeleton_3d_seq], axis=0)
 
-        return torch.from_numpy(skeleton_2d_seq), torch.from_numpy(skeleton_3d_seq)
+        project_matrix = get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
+
+        return torch.from_numpy(skeleton_2d_seq), torch.from_numpy(skeleton_3d_seq), project_matrix, R, t
 
 
     

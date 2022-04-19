@@ -104,7 +104,7 @@ class Fitter:
         self.model.eval()
         mse_loss = AverageMeter()
         t = time.time()
-        for step, (pos2ds, pos3ds) in enumerate(val_loader):
+        for step, (pos2ds, pos3ds, _, _, _) in enumerate(val_loader):
             if self.config.verbose:
                 if step % self.config.verbose_step == 0:
                     print(
@@ -117,14 +117,11 @@ class Fitter:
                 pos2ds = pos2ds.cuda().float()
                 pos3ds = pos3ds.cuda().float()
                 batch_size = pos2ds.shape[0]
-
-                #pos3ds_in = pos3ds[:,:-1,...]
-                pos3ds_out = pos3ds[:,1:,...]
                  
                 with torch.cuda.amp.autocast():
                     #preds = self.model(pos2ds, pos3ds_in)
                     preds = self.model(pos2ds)
-                    loss = self.criterion(preds,pos3ds_out)
+                    loss = self.criterion(preds,pos3ds)
 
             mse_loss.update(loss.detach().item(), batch_size)
             #self.scaler.scale(loss).backward()
@@ -138,7 +135,7 @@ class Fitter:
         self.model.train()
         mse_loss = AverageMeter()
         t = time.time()
-        for step, (pos2ds, pos3ds) in enumerate(train_loader):
+        for step, (pos2ds, pos3ds, _, _, _) in enumerate(train_loader):
             if self.config.verbose:
                 if step % self.config.verbose_step == 0:
                     print(
@@ -149,14 +146,11 @@ class Fitter:
             pos2ds = pos2ds.cuda().float()
             pos3ds = pos3ds.cuda().float()
             batch_size = pos2ds.shape[0]
-            
-            #pos3ds_in = pos3ds[:,:-1,...]
-            pos3ds_out = pos3ds[:,1:,...]
 
             with torch.cuda.amp.autocast():
                 #preds = self.model(pos2ds, pos3ds_in)
                 preds = self.model(pos2ds)
-                loss = self.criterion(preds,pos3ds_out)# + 0.000001 * l2_norm(self.model)
+                loss = self.criterion(preds,pos3ds)# + 0.000001 * l2_norm(self.model)
 
             mse_loss.update(loss.detach().item(), batch_size)
             self.scaler.scale(loss).backward()

@@ -499,10 +499,15 @@ class PureTransformerModel(nn.Module):
         nn.init.zeros_(self.fc2.bias)
         nn.init.uniform_(self.fc2.weight, -0.1, 0.1)
 
+import numpy as np
+def count_parameters_in_MB(model):
+        return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name) / 1e6
+
 if __name__ == '__main__':
     #net = ST_GCN_18(in_channels=3, num_class=11)
     #x = torch.randn(2, 3, 8, 17, 1)
-    net = PureTransformerModel(hid_dim=128, num_classes=11)
-    x = torch.randn(2, 8, 17, 3)
-    y = net(x)
-    print(y.shape)
+    m = PureTransformerModel(hid_dim=128, num_classes=11)
+    #x = torch.randn(2, 8, 17, 3)
+    #y = net(x)
+    print(count_parameters_in_MB(m))
+    #print(count_parameters_in_MB(mm))

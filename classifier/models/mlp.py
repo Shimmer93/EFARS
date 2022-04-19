@@ -106,9 +106,9 @@ class MLPTransformerModel(nn.Module):
         super(MLPTransformerModel, self).__init__()
         self.mlp = MLP(num_joint, hid_dim)
         encoder_layers = nn.TransformerEncoderLayer(d_model=hid_dim, nhead=8, batch_first=True, dropout=0.1)
-        self.encoder = nn.TransformerEncoder(encoder_layers, 6)
+        self.encoder = nn.TransformerEncoder(encoder_layers, 2)
         
-        self.fc1 = nn.Linear(seq_len * hid_dim, 1024)
+        self.fc1 = nn.Linear(hid_dim, 1024)
         self.fc2 = nn.Linear(1024, num_classes)
         self.hid_dim = hid_dim
 
@@ -123,8 +123,7 @@ class MLPTransformerModel(nn.Module):
             ys.append(y)
         ys = torch.stack(ys, dim=1)
         ys = self.encoder(ys)
-        ys = ys.reshape(b, -1)
-        out = self.fc1(ys).relu()
+        out = self.fc1(ys[:,-1,:]).relu()
         out = self.fc2(out)
         return out
 
@@ -134,11 +133,17 @@ class MLPTransformerModel(nn.Module):
         nn.init.zeros_(self.fc2.bias)
         nn.init.uniform_(self.fc2.weight, -0.1, 0.1)
 
+import numpy as np
+def count_parameters_in_MB(model):
+        return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name) / 1e6
+
 if __name__ == '__main__':
     import torch
     #m = MLP(num_joint=17, num_classes=11, pretrained=False)
     #x = torch.randn(2,17,3)
     m = MLPTransformerModel(128, 17, 11, 8)
+    mm = MLP(17, 128)
     x = torch.randn(2, 8, 17, 3)
     y = m(x)
-    print(y.shape)
+    print(count_parameters_in_MB(m))
+    print(count_parameters_in_MB(mm))
