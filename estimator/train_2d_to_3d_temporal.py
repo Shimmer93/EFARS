@@ -15,6 +15,7 @@ from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
 from models.sem_gcn import SemGCN, GCNLSTM, GCNTransformer, PureTransformer, GCNTransformerModel, PureTransformerModel, MLPLSTM, MLPTransformerModel
 from models.pose2mesh import PoseNet
+from models.video3d import TemporalModelOptimized1f
 #from models.simple_graph import GCN
 from data.human36m import Human36M2DTo3DTemporalDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything
@@ -30,14 +31,14 @@ img_path = root_path + '/imgs'
 pos2d_path = root_path + '/pos2d'
 pos3d_path = root_path + '/pos3d'
 
-img_fns = glob(img_path+'/*.jpg')
+img_fns = glob(img_path+'/S[0-9]_*.jpg')
 split = int(0.8*len(img_fns))
 random.shuffle(img_fns)
-train_fns = img_fns[:10000]
-val_fns = img_fns[10000:12000]
+train_fns = img_fns[:50000]
+val_fns = img_fns[50000:60000]
 
-train_dataset = Human36M2DTo3DTemporalDataset(train_fns, pos2d_path, pos3d_path, length=5)
-val_dataset = Human36M2DTo3DTemporalDataset(val_fns, pos2d_path, pos3d_path, length=5)
+train_dataset = Human36M2DTo3DTemporalDataset(train_fns, pos2d_path, pos3d_path, length=8)
+val_dataset = Human36M2DTo3DTemporalDataset(val_fns, pos2d_path, pos3d_path, length=8)
 
 class Fitter:
     def __init__(self, model, device, config):
@@ -155,7 +156,7 @@ class Fitter:
             with torch.cuda.amp.autocast():
                 #preds = self.model(pos2ds, pos3ds_in)
                 preds = self.model(pos2ds)
-                loss = self.criterion(preds,pos3ds_out) + 0.000001 * l2_norm(self.model)
+                loss = self.criterion(preds,pos3ds_out)# + 0.000001 * l2_norm(self.model)
 
             mse_loss.update(loss.detach().item(), batch_size)
             self.scaler.scale(loss).backward()
@@ -256,6 +257,8 @@ elif args.model == 'gcn_lstm':
     net = GCNLSTM(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=args.hid_dim).cuda()
 elif args.model == 'mlp_lstm':
     net = MLPLSTM(args.hid_dim).cuda()
+elif args.model == 'videopose3d':
+    net = TemporalModelOptimized1f(17, 2, 17, [1,1,1,1,1]).cuda()
 
 def run_training():
     device = torch.device('cuda')

@@ -35,8 +35,7 @@ class MMFit(Dataset):
     """
     MM-Fit PyTorch Dataset class.
     """
-    def __init__(self, modality_filepaths, label_path, window_length, skeleton_window_length, sensor_window_length,
-                 skeleton_transform, sensor_transform):
+    def __init__(self, pose_3d_path, label_path, skeleton_window_length, stride=5):
         """
         Initialize MMFit Dataset object.
         :param modality_filepaths: Modality - file path mapping (dict) for a workout.
@@ -47,26 +46,28 @@ class MMFit(Dataset):
         :param skeleton_transform: Transformation functions to apply to skeleton data.
         :param sensor_transform: Transformation functions to apply to sensor data.
         """
-        self.window_length = window_length
+        
         self.skeleton_window_length = skeleton_window_length
-        self.sensor_window_length = sensor_window_length
-        self.skeleton_transform = skeleton_transform
-        self.sensor_transform = sensor_transform
-        self.modalities = {}
-        for modality, filepath in modality_filepaths.items():
-            self.modalities[modality] = load_modality(filepath)
+    
+        self.poses = load_modality(pose_3d_path)
 
         self.ACTIONS = {'squats': 0, 'lunges': 1, 'bicep_curls': 2, 'situps': 3, 'pushups': 4, 'tricep_extensions': 5,
                         'dumbbell_rows': 6, 'jumping_jacks': 7, 'dumbbell_shoulder_press': 8,
                         'lateral_shoulder_raises': 9, 'non_activity': 10}
         self.labels = load_labels(label_path)
+        self.stride = stride
 
     def __len__(self):
-        return self.modalities['pose_3d'].shape[1] - self.skeleton_window_length - 30
+        return self.poses.shape[1] - self.skeleton_window_length - 30
         
     def __getitem__(self, i):
-        frame = self.modalities['pose_3d'][0, i, 0]
-        sample_modalities = {}
+        frame = self.poses[0, i, 0]
+        sample_poses = torch.as_tensor(self.poses[:, i:i+self.skeleton_window_length*self.stride:self.stride, 1:], dtype=torch.float)
+        sample_poses = sample_poses.permute(1, 2, 0)
+        sample_poses -= sample_poses[:,:1,:]
+        sample_poses /= 1000
+        sample_poses = sample_poses.permute(2, 0, 1).unsqueeze(-1) # C * T * V * 1
+
         label = 'non_activity'
         reps = 0
         for row in self.labels:
@@ -74,38 +75,8 @@ class MMFit(Dataset):
                 label = row[3]
                 reps = row[2]
                 break
-
-        for modality, data in self.modalities.items():
-            if data is None:
-                if 'pose_2d' in modality:
-                    sample_modalities[modality] = torch.zeros(2, self.skeleton_window_length, 17)
-                elif 'pose_3d' in modality:
-                    sample_modalities[modality] = torch.zeros(3, self.skeleton_window_length, 16)
-                elif 'hr' in modality:
-                    sample_modalities[modality] = torch.zeros(1, self.sensor_window_length)
-                else:
-                    sample_modalities[modality] = torch.zeros(3, self.sensor_window_length)
-            else:
-                if 'pose' in modality:
-                    sample_modalities[modality] = torch.as_tensor(self.skeleton_transform(
-                        data[:, i:i+self.skeleton_window_length, 1:]), dtype=torch.float)
-                else:
-                    start_frame_idx = np.searchsorted(data[:, 0], frame, 'left')
-
-                    time_interval_s = (data[(start_frame_idx + 1):, 1] - data[start_frame_idx, 1]) / 1000
-                    end_frame_idx = np.searchsorted(time_interval_s, self.window_length, 'left') + start_frame_idx + 1
-                    if end_frame_idx >= data.shape[0]:
-                        raise Exception('Error: end_frame_idx, {}, is out of index for data array with length {}'.
-                                        format(end_frame_idx, data.shape[0]))
-
-                    if 'hr' in modality:
-                        sample_modalities[modality] = torch.as_tensor(self.sensor_transform(
-                            data[start_frame_idx:end_frame_idx, 2].T), dtype=torch.float)
-                    else:
-                        sample_modalities[modality] = torch.as_tensor(self.sensor_transform(
-                            data[start_frame_idx:end_frame_idx, 2:].T), dtype=torch.float)
         
-        return sample_modalities, self.ACTIONS[label], reps
+        return sample_poses, self.ACTIONS[label], reps
 
 
 class SequentialStridedSampler(Sampler):
@@ -130,3 +101,10 @@ class SequentialStridedSampler(Sampler):
 
     def __iter__(self):
         return iter(range(0, len(self.data_source), self.stride))
+
+if __name__ == '__main__':
+    ds = MMFit('/home/samuel/mm-fit/w00/w00_pose_3d.npy', '/home/samuel/mm-fit/w00/w00_labels.csv', 32)
+    m, l, r = ds[0]
+    print(m)
+    #print(l)
+    #print(r)

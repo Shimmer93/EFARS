@@ -12,7 +12,7 @@ import random
 from datetime import datetime
 import time
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
-from torch.utils.data import random_split
+from torch.utils.data import random_split, ConcatDataset
 from torchvision.datasets import HMDB51
 import torchvision.transforms as T
 
@@ -66,8 +66,11 @@ valid_transforms = T.Compose([
     T.Lambda(lambda tensor: tensor.permute(0, 2, 3, 1))
 ])
 
-total_dataset = HMDB51(root=root_path, annotation_path=annot_path, frames_per_clip=8, transform=train_transforms,
-                       step_between_clips=5, fold=1, train=True, num_workers=args.num_workers)
+total_dataset = []
+for i in [1,2,3]:
+    total_dataset.append(HMDB51(root=root_path, annotation_path=annot_path, frames_per_clip=8, transform=train_transforms,
+                       step_between_clips=5, fold=i, train=True, num_workers=args.num_workers))
+total_dataset = ConcatDataset(total_dataset)
 #valid_dataset = HMDB51(root=root_path, annotation_path=annot_path, frames_per_clip=8, transform=valid_transforms,
 #                       step_between_clips=5, fold=1, train=False, num_workers=args.num_workers)
 
@@ -75,9 +78,12 @@ total_dataset = HMDB51(root=root_path, annotation_path=annot_path, frames_per_cl
 #print(imgs.shape)
 
 num_total_samples = len(total_dataset)
-num_valid_samples = int(0.2 * num_total_samples)
+num_train_samples = int(0.8 * num_total_samples)
+num_valid_samples = num_total_samples - num_train_samples
 
-train_dataset, valid_dataset = random_split(total_dataset, [num_total_samples-num_valid_samples, num_valid_samples])
+train_dataset, valid_dataset = random_split(total_dataset, [num_train_samples, num_valid_samples])
+
+print(num_total_samples, num_train_samples, num_valid_samples)
 
 class Fitter:
     def __init__(self, model, device, config):
@@ -300,6 +306,8 @@ class TrainGlobalConfig:
 #net = CNNLSTM(num_classes=14).cuda()
 if args.model == 'mobilenetv2':
     net = MobileNetV2(num_classes=26, sample_size=112).cuda()
+elif args.model == 'shufflenetv2':
+    net = ShuffleNetV2(num_classes=26, sample_size=112).cuda()
 elif args.model == 'cnnlstm':
     net = CNNLSTM(num_classes=26).cuda()
 elif args.model == 'timesformer':
@@ -328,7 +336,7 @@ def run_training():
     )
 
     fitter = Fitter(model=net, device=device, config=TrainGlobalConfig)
-#     fitter.load(f'{fitter.base_dir}/last-checkpoint.bin')
+    #fitter.load(f'{fitter.base_dir}/last-checkpoint.bin')
     fitter.fit(train_loader, val_loader)
     
     

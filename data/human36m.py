@@ -70,10 +70,6 @@ class Human36MMetadata:
                'SittingDown': 11, 'Phoning': 12, 'WalkingDog': 13, 'WalkDog': 13, 'WalkTogether': 14}
     mean = np.array([0.44245931, 0.2762126, 0.2607548])
     std = np.array([0.25389833, 0.26563732, 0.24224165])
-    pos2d_mean = np.array([531.3589047602578, 401.11892849734477])
-    pos2d_std = np.array([116.12519808242102, 110.18267048431545])
-    pos3d_mean = np.array([58.695619373856935, 221.5308073087531, 900.0432746404251])
-    pos3d_std = np.array([448.8852213564668, 667.2435126476839, 459.2800512506026])
     num_joints = 17
     used_joint_mask = np.array([1,1,1,1,0,0,1,1,
                                 1,0,0,0,1,1,1,1,
@@ -206,7 +202,7 @@ class Human36M2DTo3DDataset(Human36MBaseDataset):
         skeleton_2d = project_pos3d_to_pos2d(skeleton_3d, project_matrix)
         skeleton_2d = normalize_screen_coordinates(skeleton_2d, 1000, 1000)
         #R, t = get_camera(self.camera_parameters, subset, action.split('.')[1])
-        #skeleton_3d = (skeleton_3d - t) @ R.T
+        #skeleton_3d = skeleton_3d @ R + t
         skeleton_3d = skeleton_3d / 1000
         skeleton_3d[:,:] -= skeleton_3d[:1,:]
         #camera = normalize_camera(camera, (1000, 1000))
@@ -265,6 +261,7 @@ class Human36M2DTo3DTemporalDataset(Human36MBaseDataset):
     def __init__(self, img_fns, skeleton_2d_dir, skeleton_3d_dir, transforms=None, out_size=(256,256), length=5):
         super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, skeleton_3d_dir=skeleton_3d_dir, transforms=transforms, out_size=out_size)
         self.length = length
+        self.camera_parameters = json.load(open(Human36MMetadata.camera_parameters_path, 'r'))
 
     def __getitem__(self, index):
         img_fn, subset, action, frame = self._get_img_info(index)
@@ -275,10 +272,12 @@ class Human36M2DTo3DTemporalDataset(Human36MBaseDataset):
             img_fn_new = '_'.join(img_fn.split('_')[:-1]) + f'_{(frame+5*i):0>6d}.jpg'
             #print(f'The {i}-th image. Frame:{frame}, File name: {img_fn_new}, Origin name: {img_fn}')
             if img_fn_new in self.img_fns:
-                skeleton_2d = self._prepare_skeleton_2d(subset, action, frame+5*i)
                 skeleton_3d = self._prepare_skeleton_3d(subset, action, frame+5*i)
+                project_matrix = get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
+                skeleton_2d = project_pos3d_to_pos2d(skeleton_3d, project_matrix)
                 skeleton_2d = normalize_screen_coordinates(skeleton_2d, 1000, 1000)
                 skeleton_3d /= 1000
+                skeleton_3d[:,:] -= skeleton_3d[:1,:]
             else:
                 skeleton_2d = np.copy(skeleton_2d_seq[-1])
                 skeleton_3d = np.copy(skeleton_3d_seq[-1])
@@ -308,13 +307,13 @@ if __name__ == '__main__':
     from utils.visualization import project_pos3d_to_pos2d
     img_fns = glob('/home/samuel/h36m/imgs/*.jpg')
     train_dataset = Human36M2DTo3DDataset(img_fns, '/home/samuel/h36m/pos2d', '/home/samuel/h36m/pos3d')
-    pos2ds, pos3ds, P = train_dataset[999]
+    pos2ds, pos3ds, P = train_dataset[87878]
 
     print(pos2ds.shape)
     print(pos3ds.shape)
 
     print(pos2ds)
-    print(project_pos3d_to_pos2d(pos3ds, P))
+    print(pos3ds)
     
     #img, hmap, _ = train_dataset[0]
     #print(img.shape)

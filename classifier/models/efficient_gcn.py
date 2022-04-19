@@ -500,7 +500,7 @@ if __name__ == '__main__':
         'stem_channel': 64,
         #'block_args': [[48,1,0.5],[24,1,0.5],[64,2,1],[128,2,1]],
         'fusion_stage': 2,
-        'act': Swish,
+        #'act': Swish,
         'att_type': 'stja',
         'layer_type': 'SG',
         'drop_prob': 0.25,

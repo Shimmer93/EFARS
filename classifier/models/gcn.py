@@ -211,7 +211,7 @@ class _GraphNonLocal(nn.Module):
 
 
 class GCNClassifier(nn.Module):
-    def __init__(self, adj, hid_dim, coords_dim=(2, 3), num_layers=4, num_classes=14, nodes_group=None, p_dropout=None):
+    def __init__(self, adj, hid_dim, coords_dim=(3, 3), num_layers=4, num_classes=14, nodes_group=None, p_dropout=None):
         super(GCNClassifier, self).__init__()
 
         _gconv_input = [_GraphConv(adj, coords_dim[0], hid_dim, p_dropout=p_dropout)]

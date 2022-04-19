@@ -7,7 +7,7 @@
 #python train_2d_to_3d.py --model sem_gcn --output_path SemGCN-120-1e-2-aaa --batch_size 4 --n_epochs 120 --max_lr 1e-2
 #python train_2d_to_3d.py --model sem_gcn --output_path SemGCN-120-1e-3-aaa --batch_size 4 --n_epochs 120 --max_lr 1e-3
 #python train_2d_to_3d.py --model sem_gcn --output_path SemGCN-120-1e-4-aaa --batch_size 4 --n_epochs 120 --max_lr 1e-4
-python train_2d_to_3d.py --model sem_gcn --output_path SemGCN-60-1e-3-maybe --batch_size 16 --n_epochs 60 --max_lr 1e-3
+#python train_2d_to_3d.py --model sem_gcn --output_path SemGCN-20-1e-3 --batch_size 32 --n_epochs 20 --max_lr 1e-3
 #python train_2d_to_3d.py --model gcn --output_path GCN-120-1e-2 --batch_size 8 --n_epochs 120 --max_lr 1e-2
 #python train_2d_to_3d.py --model gcn --output_path GCN-120-1e-3 --batch_size 8 --n_epochs 120 --max_lr 1e-3
 #python train_2d_to_3d.py --model gcn --output_path GCN-120-1e-4 --batch_size 8 --n_epochs 120 --max_lr 1e-4
@@ -41,3 +41,4 @@ python train_2d_to_3d.py --model sem_gcn --output_path SemGCN-60-1e-3-maybe --ba
 #python train_2d_to_3d_temporal.py --model gcn_lstm --output_path GCNLSTM-20-1e-4-dim512 --batch_size 32 --n_epochs 20 --max_lr 1e-4 --hid_dim 512
 #python train_2d_to_3d_temporal.py --model gcn_lstm --output_path GCNLSTM-80-1e-3-dim512 --batch_size 32 --n_epochs 80 --max_lr 1e-3 --hid_dim 512
 #python train_2d_to_3d_temporal.py --model gcn_lstm --output_path GCNLSTM-80-1e-4-dim512 --batch_size 32 --n_epochs 80 --max_lr 1e-4 --hid_dim 512
+python train_2d_to_3d_temporal.py --model videopose3d --output_path VideoPose3D-20-1e-2-2 --batch_size 4 --n_epochs 20 --max_lr 1e-2
