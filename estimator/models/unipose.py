@@ -334,6 +334,10 @@ def build_backbone(backbone, output_stride, BatchNorm):
     else:
         raise NotImplementedError
 
+# In: B x 3 x W x H
+# Out: B x 17 x w x h
+# W, H: Weight and height of images
+# w == W / downsample, h == H / downsample, where downsample == 8
 class UniPose(nn.Module):
     def __init__(self, dataset, backbone='resnet', output_stride=16, num_classes=21,
                  sync_bn=True, freeze_bn=False, stride=8):

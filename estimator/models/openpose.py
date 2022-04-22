@@ -21,6 +21,10 @@ def make_layers(block, no_relu_layers):
 
     return nn.Sequential(OrderedDict(layers))
 
+# In: B x 3 x W x H
+# Out: B x 17 x w x h
+# W, H: Weight and height of images
+# w == W / downsample, h == H / downsample, where downsample == 8
 class OpenPose(nn.Module):
     def __init__(self):
         super(OpenPose, self).__init__()
@@ -138,11 +142,11 @@ class OpenPose(nn.Module):
         out6_1 = self.model6_1(out6)
         out6_2 = self.model6_2(out6)
 
-        return out6_1, out6_2
+        return out6_2#, out6_2
 
 if __name__ == '__main__':
     m = OpenPose()
     x = torch.randn(2,3,256,256)
-    y0, y1 = m(x)
+    y0= m(x)
     print(y0.shape)
-    print(y1.shape)
+    #print(y1.shape)

@@ -334,6 +334,9 @@ class vit_base_patch16_224(nn.Module):
         x = self.model(x)
         return x
 
+# In: B x 3 x T x H x W
+# Out: B x C
+# B: Batch size, T: Length of Time Sequence, C: Number of classes
 @MODEL_REGISTRY.register()
 class TimeSformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, num_classes=400, num_frames=8, attention_type='divided_space_time',  pretrained_model='', **kwargs):

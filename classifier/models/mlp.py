@@ -47,7 +47,9 @@ class Linear(nn.Module):
 
         return out
 
-
+# In: B x 17 x 3
+# Output: B x C
+# B: Batch size, T: Length of Time Sequence, C: Number of classes
 class MLP(nn.Module):
     def __init__(self,
                  num_joint,
@@ -101,6 +103,9 @@ class MLP(nn.Module):
         checkpoint = load_checkpoint(load_dir='/home/zpengac/pose/EFARS/estimator/best.pth.tar', pick_best=True)
         self.load_state_dict(checkpoint['model_state_dict'])
 
+# In: B x T x 17 x 3
+# Output: B x C
+# B: Batch size, T: Length of Time Sequence, C: Number of classes
 class MLPTransformerModel(nn.Module):
     def __init__(self, hid_dim, num_joint, num_classes, seq_len):
         super(MLPTransformerModel, self).__init__()
@@ -119,7 +124,6 @@ class MLPTransformerModel(nn.Module):
         ys = []
         for i in range(t):
             y = self.mlp(xs[:,i,:,:])
-            #y = self.fc1(y.reshape(b, n * self.hid_dim))
             ys.append(y)
         ys = torch.stack(ys, dim=1)
         ys = self.encoder(ys)
@@ -132,18 +136,3 @@ class MLPTransformerModel(nn.Module):
         nn.init.uniform_(self.fc1.weight, -0.1, 0.1)
         nn.init.zeros_(self.fc2.bias)
         nn.init.uniform_(self.fc2.weight, -0.1, 0.1)
-
-import numpy as np
-def count_parameters_in_MB(model):
-        return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name) / 1e6
-
-if __name__ == '__main__':
-    import torch
-    #m = MLP(num_joint=17, num_classes=11, pretrained=False)
-    #x = torch.randn(2,17,3)
-    m = MLPTransformerModel(128, 17, 11, 8)
-    mm = MLP(17, 128)
-    x = torch.randn(2, 8, 17, 3)
-    y = m(x)
-    print(count_parameters_in_MB(m))
-    print(count_parameters_in_MB(mm))

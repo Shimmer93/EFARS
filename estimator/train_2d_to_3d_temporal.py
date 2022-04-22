@@ -13,15 +13,13 @@ from datetime import datetime
 import time
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
-from models.sem_gcn import SemGCN, GCNLSTM, GCNTransformer, PureTransformer, GCNTransformerModel, PureTransformerModel, MLPLSTM, MLPTransformerModel
-from models.pose2mesh import PoseNet
+from models.sem_gcn import SemGCN
+from models.attention import GCNTransformerModel, MLPTransformerModel, PureTransformerModel
 from models.video3d import TemporalModelOptimized1f
-#from models.simple_graph import GCN
+
 from data.human36m import Human36M2DTo3DTemporalDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything
 from utils.graph import adj_mx_from_edges
-from utils.transform import do_2d_to_3d_transforms
-
 from utils.parser import args
 
 seed_everything(args.seed)
@@ -79,7 +77,6 @@ class Fitter:
             summary_loss = self.train_one_epoch(train_loader)
 
             self.log(f'[RESULT]: Train. Epoch: {self.epoch}, mse_loss: {summary_loss.avg:.8f}, time: {(time.time() - t):.5f}')
-            #self.log(f'[RESULT]: Train. Epoch: {self.epoch}, accuracy: {val_loss.avg:.8f}, time: {(time.time() - t):.5f}')
  
             self.save(f'{self.base_dir}/last-checkpoint.bin')
 
@@ -87,7 +84,7 @@ class Fitter:
             summary_loss = self.validation(validation_loader)
 
             self.log(f'[RESULT]: Val. Epoch: {self.epoch}, mse_loss: {summary_loss.avg:.8f}, time: {(time.time() - t):.5f}')
-            #self.log(f'[RESULT]: Val. Epoch: {self.epoch}, accuracy: {val_loss.avg:.8f}, time: {(time.time() - t):.5f}')
+
             if summary_loss.avg < self.best_summary_loss:
                 self.best_summary_loss = summary_loss.avg
                 self.model.eval()
@@ -238,19 +235,10 @@ class TrainGlobalConfig:
         final_div_factor=args.final_div_factor
     )
     
-if args.model == 'gcn_trans':
-    #net = GCNLSTM(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=128).cuda()
-    net = GCNTransformer(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=args.hid_dim).cuda()
-elif args.model == 'trans':
-    net = PureTransformer(args.hid_dim).cuda()
-elif args.model == 'gcn_trans_enc':
+if args.model == 'gcn_trans_enc':
     net = GCNTransformerModel(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=args.hid_dim).cuda()
 elif args.model == 'trans_enc':
     net = PureTransformerModel(args.hid_dim).cuda()
-elif args.model == 'gcn_lstm':
-    net = GCNLSTM(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=args.hid_dim).cuda()
-elif args.model == 'mlp_lstm':
-    net = MLPLSTM(args.hid_dim).cuda()
 elif args.model == 'videopose3d':
     net = TemporalModelOptimized1f(17, 2, 17, [1,1,1,1,1]).cuda()
 

@@ -13,28 +13,20 @@ from datetime import datetime
 import time
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 from torch.utils.data import random_split, ConcatDataset
-from data.mm_fit import MMFit
 import torchvision.transforms as T
 
 #from models.torchvision_models import ResNet18, ResNet50, MobileNetV3Small
-from models.st_gcn import ST_GCN_18, PureTransformerModel
+from models.st_gcn import ST_GCN_18
 from models.ctr_gcn import CTR_GCN
 from models.mlp import MLP, MLPTransformerModel
 
-from data.human36m import Human36M2DTemporalDataset, Human36MMetadata
+from data.mm_fit import MMFit, MMFitMetaData
 from utils.misc import AverageMeter, seed_everything
-from utils.transform import do_pos2d_train_transforms, do_pos2d_val_transforms
-from utils.graph import adj_mx_from_edges
 from utils.parser import args
 
 seed_everything(args.seed)
 
 root_path = '/home/samuel/mm-fit'
-
-# TODO: transforms
-
-#train_dataset = Human36M2DTemporalDataset(train_fns, pos2d_path, transforms=do_pos2d_train_transforms, mode='C')
-#val_dataset = Human36M2DTemporalDataset(val_fns, pos2d_path, transforms=do_pos2d_val_transforms, mode='C')
 
 TRAIN_W_IDs = ['01', '02', '03', '04', '06', '07', '08', '16', '17', '18']
 VAL_W_IDs = ['14', '15', '19']
@@ -275,16 +267,14 @@ class TrainGlobalConfig:
         final_div_factor=args.final_div_factor
     )
     
-#net = ResNet18(num_classes=14, pretrained=True).cuda()
-#net = CNNLSTM(num_classes=14).cuda()
 if args.model == 'st_gcn':
-    net = ST_GCN_18(in_channels=3, num_class=11).cuda()
+    net = ST_GCN_18(in_channels=3, num_class=MMFitMetaData.num_classes).cuda()
 elif args.model == 'ctr_gcn':
-    net = CTR_GCN(num_class=11, num_point=17, num_person=1).cuda()
+    net = CTR_GCN(num_class=MMFitMetaData.num_classes, num_point=MMFitMetaData.num_joints, num_person=1).cuda()
 elif args.model == 'mlp':
-    net = MLP(num_joint=17, num_classes=11).cuda()
+    net = MLP(num_joint=MMFitMetaData.num_joints, num_classes=MMFitMetaData.num_classes).cuda()
 elif args.model == 'mlp_trans_enc':
-    net = MLPTransformerModel(128, 17, 11, 8).cuda()
+    net = MLPTransformerModel(128, MMFitMetaData.num_joints, MMFitMetaData.num_classes, 8).cuda()
 
 
 def run_training():

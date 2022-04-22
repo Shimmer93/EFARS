@@ -19,7 +19,7 @@ class PoseEstmator(nn.Module):
         self.frontend.eval()
 
         if pos3d_model == 'pose2mesh':
-            from .pose2mesh import PoseNet
+            from .mlp import PoseNet
             self.backend = PoseNet(num_joint=num_joints)
             self.backend_metadata = {'mode': 'positions'}
         elif pos3d_model == 'sem_gcn':

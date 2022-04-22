@@ -271,7 +271,9 @@ def zero(x):
 def iden(x):
     return x
 
-
+# In: B x 3 x T x 17 x 1
+# Output: B x C
+# B: Batch size, T: Length of Time Sequence, C: Number of classes
 class ST_GCN_18(nn.Module):
     r"""Spatial temporal graph convolutional networks.
     Args:
@@ -415,7 +417,7 @@ class st_gcn_block(nn.Module):
                  out_channels,
                  kernel_size,
                  stride=1,
-                 dropout=0,
+                 dropout=0.1,
                  residual=True):
         super().__init__()
 
@@ -464,50 +466,3 @@ class st_gcn_block(nn.Module):
         x = self.tcn(x) + res
 
         return self.relu(x), A
-
-class PureTransformerModel(nn.Module):
-    def __init__(self, hid_dim, num_classes):
-        super(PureTransformerModel, self).__init__()
-        encoder_layers = nn.TransformerEncoderLayer(d_model=hid_dim, nhead=8, batch_first=True, dropout=0.1)
-        self.encoder = nn.TransformerEncoder(encoder_layers, 6)
-        
-        self.fc1 = nn.Linear(51, hid_dim)
-        #self.fc2 = nn.Linear(hid_dim, hid_dim)
-        self.fc2 = nn.Linear(hid_dim, num_classes)
-        #self.pos_enc = PositionalEncoding(hid_dim)
-        self.hid_dim = hid_dim
-
-        self.init_params()
-
-    def forward(self, xs):
-        b, t, n, _ = xs.shape
-        ys = xs.reshape(b * t, n * 3)
-        ys = self.fc1(ys)
-        #ys = self.fc2(ys)
-        ys = ys.reshape(b, t, self.hid_dim)# * math.sqrt(self.hid_dim)
-        #ys = self.pos_enc(ys)
-        ys = self.encoder(ys)
-        out = self.fc2(ys)#.relu()
-        #out = self.fc3(out)
-        out = out.sum(dim=1)
-
-        return out
-
-    def init_params(self):
-        nn.init.zeros_(self.fc1.bias)
-        nn.init.uniform_(self.fc1.weight, -0.1, 0.1)
-        nn.init.zeros_(self.fc2.bias)
-        nn.init.uniform_(self.fc2.weight, -0.1, 0.1)
-
-import numpy as np
-def count_parameters_in_MB(model):
-        return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name) / 1e6
-
-if __name__ == '__main__':
-    #net = ST_GCN_18(in_channels=3, num_class=11)
-    #x = torch.randn(2, 3, 8, 17, 1)
-    m = PureTransformerModel(hid_dim=128, num_classes=11)
-    #x = torch.randn(2, 8, 17, 3)
-    #y = net(x)
-    print(count_parameters_in_MB(m))
-    #print(count_parameters_in_MB(mm))

@@ -441,7 +441,9 @@ class TCN_GCN_unit(nn.Module):
         y = self.relu(self.tcn1(self.gcn1(x)) + self.residual(x))
         return y
 
-
+# In: B x 3 x T x 17 x 1
+# Output: B x C
+# B: Batch size, T: Length of Time Sequence, C: Number of classes
 class CTR_GCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, in_channels=3,
                  drop_out=0, adaptive=True):
@@ -502,9 +504,3 @@ class CTR_GCN(nn.Module):
         x = self.drop_out(x)
 
         return self.fc(x)
-
-if __name__ == '__main__':
-    net = CTR_GCN(num_class=11, num_point=17, num_person=1)
-    x = torch.randn(2, 3, 8, 17, 1)
-    y = net(x)
-    print(y.shape)

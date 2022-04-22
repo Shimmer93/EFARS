@@ -1,7 +1,8 @@
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
 import numpy as np
-import torch
+import cv2 as cv
+from scipy.ndimage.filters import gaussian_filter
 
 #def normalize(img, mean, std):
 #    img = (img - std[None,None,...]) / mean[None,None,...]
@@ -20,6 +21,49 @@ def denormalize(img, mean, std):
     for i in range(img.shape[-1]):
         img[...,i] = img[...,i] * std[i] + mean[i]
     return img
+
+def normalize_screen_coordinates(X, w, h):
+    assert X.shape[-1] == 2
+
+    # Normalize so that [0, w] is mapped to [-1, 1], while preserving the aspect ratio
+    return X / w * 2 - [1, h / w]
+
+def image_coordinates(X, w, h):
+    assert X.shape[-1] == 2
+
+    # Reverse camera frame normalization
+    return (X + [1, h / w]) * w / 2
+
+def get_project_matrix(R, t, cali):
+    return cali @ np.hstack([R, t])
+
+def project_pos3d_to_pos2d(pos3d, project_matrix):
+    pos3d_homo = np.concatenate((pos3d, np.ones((pos3d.shape[0], 1))), axis=-1)
+    pos2d_homo = pos3d_homo @ project_matrix.T
+    pos2d = pos2d_homo[:,:2] / pos2d_homo[:,2:3]
+    return pos2d
+
+def pos2d_to_hmap(pos2d, img_size, downsample, sigma):
+    hmap = np.zeros((img_size[0], img_size[1], pos2d.shape[0]), dtype=float)
+    for i in range(0, pos2d.shape[0]):
+        hmap[int(pos2d[i,1]), int(pos2d[i,0]), i] = 1.0
+        hmap[:, :, i] = gaussian_filter(hmap[:, :, i], sigma=sigma)
+    hmap[hmap > 1] = 1
+    hmap[hmap < 0.001] = 0
+    hmap = cv.resize(hmap, (img_size[0]//downsample, img_size[1]//downsample), cv.INTER_LINEAR)
+    hmap = hmap.transpose(2, 0, 1)
+    return hmap
+
+def hmap_to_pos2d(hmap, img_size):
+    pos2d = []
+    for i in range(len(hmap)):
+        resized_hmap = cv.resize(hmap[i], img_size, interpolation=cv.INTER_CUBIC)
+        pos = np.unravel_index(np.argmax(resized_hmap, axis=None), resized_hmap.shape)
+        x = int(pos[1])
+        y = int(pos[0])
+        pos2d.append([x, y])
+    pos2d = np.array(pos2d)
+    return pos2d
 
 def get_random_crop_positions_with_pos2d(img, pos2d, crop_size):
     max_pos = np.max(pos2d, axis=0)

@@ -13,13 +13,13 @@ from datetime import datetime
 import time
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
-from models.sem_gcn import SemGCN, GCNLSTM
-from models.pose2mesh import PoseNet
+from models.sem_gcn import SemGCN
+from estimator.models.mlp import MLP
 from data.human36m import Human36M2DTo3DDataset, Human36M2DTo3DTemporalDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything, accuracy
 from utils.graph import adj_mx_from_edges
 
-seed_everything(1120)
+seed_everything(2333)
 
 root_path = '/scratch/PI/cqf/datasets/h36m'
 img_path = root_path + '/img'
@@ -31,8 +31,8 @@ split = int(0.8*len(img_fns))
 random.shuffle(img_fns)
 test_fns = img_fns[12000:14000]
 
-#test_dataset = Human36M2DTo3DDataset(test_fns, pos2d_path, pos3d_path)
-test_dataset = Human36M2DTo3DTemporalDataset(test_fns, pos2d_path, pos3d_path)
+test_dataset = Human36M2DTo3DDataset(test_fns, pos2d_path, pos3d_path)
+#test_dataset = Human36M2DTo3DTemporalDataset(test_fns, pos2d_path, pos3d_path)
 
 def mpjpe(predicted, target):
     """
@@ -95,9 +95,7 @@ class TestGlobalConfig:
     folder = 'GCNLSTM-60-1e-2'
     
 #net = SemGCN(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=128).cuda()
-#net = PoseNet(num_joint=17)#.cuda()
-net = GCNLSTM(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=128)
-
+net = MLP(num_joint=17).cuda()
 
 def run_testing():
     device = torch.device('cpu')

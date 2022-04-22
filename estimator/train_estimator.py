@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(1, '/home/zpengac/pose/EFARS/')
+sys.path.insert(1, '/home/samuel/EFARS/')
 
 import torch
 import torch.nn as nn
@@ -18,11 +18,12 @@ from models.unipose import UniPose
 from data.human36m import Human36M2DPoseDataset
 from utils.transform import do_pos2d_train_transforms, do_pos2d_val_transforms
 from utils.misc import AverageMeter, seed_everything
+from utils.parser import args
 
-seed_everything(2333)
+seed_everything(args.seed)
 
-root_path = '/scratch/PI/cqf/datasets/h36m'
-img_path = root_path + '/img'
+root_path = '/home/samuel/h36m'
+img_path = root_path + '/imgs'
 pos2d_path = root_path + '/pos2d'
 
 img_fns = glob(img_path+'/*.jpg')
@@ -31,15 +32,15 @@ random.shuffle(img_fns)
 train_fns = img_fns[:10000]
 val_fns = img_fns[10000:12000]
 
-train_dataset = Human36M2DPoseDataset(train_fns, pos2d_path, transforms=do_pos2d_train_transforms, out_size=(256,256), mode='E', sigma=1)
-val_dataset = Human36M2DPoseDataset(val_fns, pos2d_path, transforms=do_pos2d_val_transforms, out_size=(256,256), mode='E', sigma=1)
+train_dataset = Human36M2DPoseDataset(train_fns, pos2d_path, transforms=do_pos2d_train_transforms, out_size=(256,256), mode='E', sigma=args.sigma)
+val_dataset = Human36M2DPoseDataset(val_fns, pos2d_path, transforms=do_pos2d_val_transforms, out_size=(256,256), mode='E', sigma=args.sigma)
 
 class Fitter:
     def __init__(self, model, device, config):
         self.config = config
         self.epoch = 0
 
-        self.base_dir = f'/home/zpengac/pose/EFARS/estimator/checkpoints/{config.folder}'
+        self.base_dir = f'/home/samuel/EFARS/estimator/checkpoints/{config.folder}'
         if not os.path.exists(self.base_dir):
             os.makedirs(self.base_dir)
         
@@ -50,7 +51,7 @@ class Fitter:
         if torch.cuda.device_count() > 1:
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-            self.model = nn.DataParallel(self.model, device_ids=[0,1,2,3,4,5,6,7])
+            self.model = nn.DataParallel(self.model, device_ids=[0])
         self.device = device
 
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.lr)
@@ -73,7 +74,6 @@ class Fitter:
             summary_loss = self.train_one_epoch(train_loader)
 
             self.log(f'[RESULT]: Train. Epoch: {self.epoch}, mse_loss: {summary_loss.avg:.8f}, time: {(time.time() - t):.5f}')
-            #self.log(f'[RESULT]: Train. Epoch: {self.epoch}, accuracy: {val_loss.avg:.8f}, time: {(time.time() - t):.5f}')
  
             self.save(f'{self.base_dir}/last-checkpoint.bin')
 
@@ -81,7 +81,7 @@ class Fitter:
             summary_loss = self.validation(validation_loader)
 
             self.log(f'[RESULT]: Val. Epoch: {self.epoch}, mse_loss: {summary_loss.avg:.8f}, time: {(time.time() - t):.5f}')
-            #self.log(f'[RESULT]: Val. Epoch: {self.epoch}, accuracy: {val_loss.avg:.8f}, time: {(time.time() - t):.5f}')
+
             if summary_loss.avg < self.best_summary_loss:
                 self.best_summary_loss = summary_loss.avg
                 self.model.eval()
@@ -197,13 +197,12 @@ class Fitter:
             
             
 class TrainGlobalConfig:
-    num_workers = 8
-    batch_size = 2 * torch.cuda.device_count()
-    n_epochs = 80
-    lr = 0.0002
+    num_workers = args.num_workers
+    batch_size = args.batch_size * torch.cuda.device_count()
+    n_epochs = args.n_epochs
 
-    folder = 'UniPose-80-1e-2-sigma1'
-    
+    folder = args.output_path
+    lr = args.max_lr
 
     # -------------------
     verbose = True
@@ -211,30 +210,26 @@ class TrainGlobalConfig:
     # -------------------
 
     # --------------------
-    step_scheduler = True  # do scheduler.step after optimizer.step
-    validation_scheduler = False  # do scheduler.step after validation stage loss
+    step_scheduler = False  # do scheduler.step after optimizer.step
+    validation_scheduler = True  # do scheduler.step after validation stage loss
 
-    SchedulerClass = torch.optim.lr_scheduler.OneCycleLR
+    SchedulerClass = torch.optim.lr_scheduler.ReduceLROnPlateau # #OneCycleLR #ReduceLROnPlateau
     scheduler_params = dict(
-        max_lr=1e-2,
-        #total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
-        epochs=n_epochs,
-        steps_per_epoch=int(len(train_dataset) / batch_size),
-        pct_start=0.2,
-        anneal_strategy='cos', 
-        final_div_factor=10**5
+        patience=5,
+        factor=0.1,
+        #max_lr=args.max_lr,
+        ##total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
+        #epochs=n_epochs,
+        #steps_per_epoch=int(len(train_dataset) / batch_size),
+        #pct_start=args.pct_start,
+        #anneal_strategy=args.anneal_strategy, 
+        #final_div_factor=args.final_div_factor
     )
-    
-    
-net = UniPose(dataset='human3.6m',num_classes=17).cuda()
-#net = OpenPose().cuda()
 
-def count_parameters_in_MB(model):
-    return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name) / 1e6
-
-print(count_parameters_in_MB(net))
-
-#net = net.cuda()
+if args.model == 'unipose':
+    net = UniPose(dataset='human3.6m',num_classes=17).cuda()
+elif args.model == 'openpose':
+    net = OpenPose().cuda()
 
 def run_training():
     device = torch.device('cuda')

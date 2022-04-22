@@ -14,8 +14,7 @@ import time
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
 from models.sem_gcn import SemGCN
-from models.pose2mesh import PoseNet
-#from models.simple_graph import GCN
+from estimator.models.mlp import MLP
 from data.human36m import Human36M2DTo3DDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything
 from utils.graph import adj_mx_from_edges
@@ -78,7 +77,6 @@ class Fitter:
             summary_loss = self.train_one_epoch(train_loader)
 
             self.log(f'[RESULT]: Train. Epoch: {self.epoch}, mse_loss: {summary_loss.avg:.8f}, time: {(time.time() - t):.5f}')
-            #self.log(f'[RESULT]: Train. Epoch: {self.epoch}, accuracy: {val_loss.avg:.8f}, time: {(time.time() - t):.5f}')
  
             self.save(f'{self.base_dir}/last-checkpoint.bin')
 
@@ -86,7 +84,7 @@ class Fitter:
             summary_loss = self.validation(validation_loader)
 
             self.log(f'[RESULT]: Val. Epoch: {self.epoch}, mse_loss: {summary_loss.avg:.8f}, time: {(time.time() - t):.5f}')
-            #self.log(f'[RESULT]: Val. Epoch: {self.epoch}, accuracy: {val_loss.avg:.8f}, time: {(time.time() - t):.5f}')
+
             if summary_loss.avg < self.best_summary_loss:
                 self.best_summary_loss = summary_loss.avg
                 self.model.eval()
@@ -148,8 +146,6 @@ class Fitter:
 
             mse_loss.update(loss.detach().item(), batch_size)
             self.scaler.scale(loss).backward()
-
-            nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1)
 
             # loss = loss / self.iters_to_accumulate # gradient accumulation
             
@@ -232,14 +228,9 @@ class TrainGlobalConfig:
     )
     
 if args.model == 'sem_gcn':
-    #edges = list(filter(lambda x: x[1] >= 0, zip(list(range(0, 16)), Human36MMetadata.parents2)))
     net = SemGCN(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), num_layers=4, hid_dim=128).cuda()
-elif args.model == 'gcn':
-    #edge_index = adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False)
-    edges = torch.tensor(Human36MMetadata.skeleton_edges, dtype=torch.long).T
-    #net = GCN(edge_index=edges.cuda(), hidden_channels=128).cuda()
-elif args.model == 'pose2mesh':
-    net = PoseNet(num_joint=17).cuda()
+elif args.model == 'mlp':
+    net = MLP(num_joint=17).cuda()
 
 def run_training():
     device = torch.device('cuda')

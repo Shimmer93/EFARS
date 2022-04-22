@@ -16,37 +16,17 @@ from torch.utils.data import random_split, ConcatDataset
 from torchvision.datasets import HMDB51
 import torchvision.transforms as T
 
-#from models.torchvision_models import ResNet18, ResNet50, MobileNetV3Small
-from models.lstm import CNNLSTM
-from models.gcn import GCNClassifier
-from models.temporal import ShuffleNetV2, MobileNetV2, SqueezeNet
+from models.cnn_lstm import CNNLSTM
+from models.cnn_3d import ShuffleNetV2, MobileNetV2, SqueezeNet
 from models.timesformer.vit import TimeSformer
 
-from data.human36m import Human36M2DTemporalDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything
-from utils.transform import do_pos2d_train_transforms, do_pos2d_val_transforms
-from utils.graph import adj_mx_from_edges
 from utils.parser import args
 
 seed_everything(args.seed)
 
-#root_path = '/scratch/PI/cqf/datasets/h36m'
-#img_path = root_path + '/img'
-#pos2d_path = root_path + '/pos2d'
-
-#img_fns = glob(img_path+'/*.jpg')
-#split = int(0.8*len(img_fns))
-#random.shuffle(img_fns)
-#train_fns = img_fns[:10000]
-#val_fns = img_fns[10000:12000]
-
 root_path = '/home/samuel/hmdb51/videos'
 annot_path = '/home/samuel/hmdb51/annots'
-
-# TODO: transforms
-
-#train_dataset = Human36M2DTemporalDataset(train_fns, pos2d_path, transforms=do_pos2d_train_transforms, mode='C')
-#val_dataset = Human36M2DTemporalDataset(val_fns, pos2d_path, transforms=do_pos2d_val_transforms, mode='C')
 
 train_transforms = T.Compose([
     T.Lambda(lambda tensor: tensor.permute(0, 3, 1, 2)),
@@ -71,11 +51,6 @@ for i in [1,2,3]:
     total_dataset.append(HMDB51(root=root_path, annotation_path=annot_path, frames_per_clip=8, transform=train_transforms,
                        step_between_clips=5, fold=i, train=True, num_workers=args.num_workers))
 total_dataset = ConcatDataset(total_dataset)
-#valid_dataset = HMDB51(root=root_path, annotation_path=annot_path, frames_per_clip=8, transform=valid_transforms,
-#                       step_between_clips=5, fold=1, train=False, num_workers=args.num_workers)
-
-#imgs, _, label = train_dataset[0]
-#print(imgs.shape)
 
 num_total_samples = len(total_dataset)
 num_train_samples = int(0.8 * num_total_samples)
@@ -174,7 +149,6 @@ class Fitter:
                     imgs = imgs.permute((0, 1, 4, 2, 3))
                 else:
                     imgs = imgs.permute((0, 4, 1, 2, 3))
-                #skeletons = skeletons.cuda().float()
                 labels = labels.cuda()
                 batch_size = imgs.shape[0]
                 
@@ -208,7 +182,6 @@ class Fitter:
                 imgs = imgs.permute((0, 1, 4, 2, 3))
             else:
                 imgs = imgs.permute((0, 4, 1, 2, 3))
-            #skeletons = skeletons.cuda().float()
             labels = labels.cuda()
             batch_size = imgs.shape[0]
             
@@ -302,8 +275,6 @@ class TrainGlobalConfig:
         #final_div_factor=args.final_div_factor
     )
     
-#net = ResNet18(num_classes=14, pretrained=True).cuda()
-#net = CNNLSTM(num_classes=14).cuda()
 if args.model == 'mobilenetv2':
     net = MobileNetV2(num_classes=26, sample_size=112).cuda()
 elif args.model == 'shufflenetv2':
@@ -312,7 +283,6 @@ elif args.model == 'cnnlstm':
     net = CNNLSTM(num_classes=26).cuda()
 elif args.model == 'timesformer':
     net = TimeSformer(img_size=112, num_classes=26, num_frames=8).cuda()
-#net = GCNClassifier(adj=adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False), hid_dim=128).cuda()
 
 def run_training():
     device = torch.device('cuda')

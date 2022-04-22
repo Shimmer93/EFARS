@@ -2,9 +2,6 @@
 
 import torch
 import torch.nn as nn
-#from core.config import cfg as cfg
-#from funcs_utils import load_checkpoint
-
 
 def weight_init(m):
     if isinstance(m, nn.Linear):
@@ -47,15 +44,17 @@ class Linear(nn.Module):
 
         return out
 
-
-class PoseNet(nn.Module):
+# In: B x 17 x 2
+# Out: B x 17 x 3
+# B: Batch size
+class MLP(nn.Module):
     def __init__(self,
                  num_joint,
                  linear_size=4096,
                  num_stage=2,
                  p_dropout=0.5,
                  pretrained=False):
-        super(PoseNet, self).__init__()
+        super(MLP, self).__init__()
 
         self.linear_size = linear_size
         self.p_dropout = p_dropout
@@ -101,10 +100,3 @@ class PoseNet(nn.Module):
         print("Loading pretrained posenet...")
         checkpoint = load_checkpoint(load_dir='/home/zpengac/pose/EFARS/estimator/best.pth.tar', pick_best=True)
         self.load_state_dict(checkpoint['model_state_dict'])
-
-if __name__ == '__main__':
-    import torch
-    m = PoseNet(num_joint=17, pretrained=True)
-    x = torch.randn(2,17,2)
-    y = m(x)
-    print(y.shape)

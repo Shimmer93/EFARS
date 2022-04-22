@@ -3,6 +3,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=2333, help='Global seed')
 parser.add_argument('--hid_dim', type=int, default=128, help='Hidden dimension')
+parser.add_argument('--sigma', type=int, default=3, help='Sigma for heatmap')
 parser.add_argument('--crop_size', type=int, default=256, help='The size of the randomly cropped part of the images')
 parser.add_argument('--downsample', type=int, default=8, help='The ratio by which the density maps shrink')
 parser.add_argument('--num_workers', type=int, default=8, help='Number of workers created by the Pytorch dataloader')

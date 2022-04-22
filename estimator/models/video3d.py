@@ -76,6 +76,12 @@ class TemporalModelBase(nn.Module):
         
         return x    
 
+# In: B x T x 17 x 2
+# if filter_widths == [3, 3, 3]:
+#   Out: B x (T - 26) x 17 x 3 (T > 27)
+# if filter_widths == [3, 3, 3, 3, 3]:
+#   Out: B x (T - 242) x 17 x 3 (T > 243)
+# B: Batch size, T: Length of Sequence
 class TemporalModel(TemporalModelBase):
     """
     Reference 3D pose estimation model with temporal convolutions.
@@ -136,7 +142,11 @@ class TemporalModel(TemporalModelBase):
         
         x = self.shrink(x)
         return x
-    
+
+# In: B x T x 17 x 2
+# Out: B x T x 17 x 3
+# filter_widths: [1, 1, 1, 1, 1]:
+# B: Batch size, T: Length of Sequence
 class TemporalModelOptimized1f(TemporalModelBase):
     """
     3D pose estimation model optimized for single-frame batching, i.e.

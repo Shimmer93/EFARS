@@ -3,6 +3,9 @@ import os
 import numpy as np
 import torch
 
+def count_parameters_in_MB(model):
+    return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name) / 1e6
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self):

@@ -28,6 +28,9 @@ class CNNLSTM(nn.Module):
         x = self.fc2(x)
         return x
 
+# In: B x T x 3 x H x W
+# Out: B x C
+# B: Batch size, T: Length of Time Sequence, C: Number of classes
 if __name__ == '__main__':
     m = CNNLSTM(num_classes=14)
     x = torch.randn(2,5,3,128,128)

@@ -13,6 +13,7 @@ import os
 from scipy.ndimage import gaussian_filter
 import json
 from utils.visualization import project_pos3d_to_pos2d
+from utils.transform import normalize_screen_coordinates, image_coordinates
 
 def pos2d_preprocess(input_dir, output_dir=None):
     if output_dir is None:
@@ -36,33 +37,6 @@ def pos3d_preprocess(input_dir, output_dir=None):
         #np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts[:,Human36MMetadata.used_joint_mask,:])
         np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts)
 
-def normalize_screen_coordinates(X, w, h):
-    assert X.shape[-1] == 2
-
-    # Normalize so that [0, w] is mapped to [-1, 1], while preserving the aspect ratio
-    return X / w * 2 - [1, h / w]
-
-def image_coordinates(X, w, h):
-    assert X.shape[-1] == 2
-
-    # Reverse camera frame normalization
-    return (X + [1, h / w]) * w / 2
-
-def get_project_matrix(cps, subset, id):
-    Rt = cps['extrinsics'][subset][str(id)]
-    R = Rt['R']
-    t = Rt['t']
-    cali = cps['intrinsics'][str(id)]['calibration_matrix']
-    P = cali @ np.hstack([R, t])
-
-    return P
-
-def get_camera(cps, subset, id):
-    Rt = cps['extrinsics'][subset][str(id)]
-    R = Rt['R']
-    t = Rt['t']
-    return np.array(R), np.array(t).T
-
 class Human36MMetadata:
     num_classes = 15
     classes = {'Directions': 0, 'Discussion': 1, 'Eating': 2, 'Greeting': 3, 'TakingPhoto': 4, 'Photo':4, 
@@ -80,6 +54,10 @@ class Human36MMetadata:
                          'LElbow', 'LWrist', 'RShoulder', 'RElbow', 'RWrist']
     skeleton_edges = [(1, 0), (2, 1), (3, 2), (4, 0), (5, 4), (6, 5), (7, 0), (8, 7), 
                       (9, 8), (10, 9), (11, 8), (12, 11), (13, 12), (14, 8), (15, 14), (16, 15)]
+    mean_3d_bone_lengths = [0.13300511, 0.45407227, 0.45066762, 0.13300464, 
+                            0.45407124, 0.45066731, 0.24290385, 0.25399462, 
+                            0.11620144, 0.11500009, 0.15595447, 0.28262905, 
+                            0.24931334, 0.15595369, 0.28263132, 0.24931305]
     camera_parameters_path = '/home/samuel/EFARS/data/human36m_camera_parameters.json'
 
 class Human36MBaseDataset(Dataset):
@@ -126,7 +104,6 @@ class Human36MBaseDataset(Dataset):
             skeleton_2d = np.copy(skeleton_2ds[-1])
         return skeleton_2d
 
-    # Further processing is needed for 3D skeletons
     def _prepare_skeleton_3d(self, subset, action, frame):
         skeleton_3d_fn = os.path.join(self.skeleton_3d_dir, subset, 'MyPoseFeatures/D3_Positions', action.split('.')[0] + '.npy')
         skeleton_3ds = np.load(skeleton_3d_fn)
@@ -136,7 +113,7 @@ class Human36MBaseDataset(Dataset):
             skeleton_3d = np.copy(skeleton_3ds[-1].clone())
         return skeleton_3d
 
-    def _generate_hmap(self, skeleton_2d):
+    def _generate_hmap2(self, skeleton_2d):
         hmap = np.zeros((skeleton_2d.shape[0], self.out_size[0]//self.downsample, self.out_size[1]//self.downsample), dtype=float)
         for i in range(0, skeleton_2d.shape[0]):
             hmap[i, int(skeleton_2d[i,1])//self.downsample, int(skeleton_2d[i,0])//self.downsample] = 1.0
@@ -145,7 +122,7 @@ class Human36MBaseDataset(Dataset):
         hmap[hmap < 0.001] = 0
         return hmap
 
-    def _generate_hmap2(self, skeleton_2d):
+    def _generate_hmap(self, skeleton_2d):
         hmap = np.zeros((self.out_size[0], self.out_size[1], skeleton_2d.shape[0]), dtype=float)
         for i in range(0, skeleton_2d.shape[0]):
             hmap[int(skeleton_2d[i,1]), int(skeleton_2d[i,0]), i] = 1.0
@@ -155,6 +132,21 @@ class Human36MBaseDataset(Dataset):
         hmap = cv.resize(hmap, (self.out_size[0]//self.downsample, self.out_size[1]//self.downsample), cv.INTER_LINEAR)
         hmap = hmap.transpose(2, 0, 1)
         return hmap
+
+    def _get_project_matrix(self, cps, subset, id):
+        Rt = cps['extrinsics'][subset][str(id)]
+        R = Rt['R']
+        t = Rt['t']
+        cali = cps['intrinsics'][str(id)]['calibration_matrix']
+        P = cali @ np.hstack([R, t])
+
+        return P
+
+    def _get_camera(self, cps, subset, id):
+        Rt = cps['extrinsics'][subset][str(id)]
+        R = Rt['R']
+        t = Rt['t']
+        return np.array(R), np.array(t).T
 
 class Human36M2DPoseDataset(Human36MBaseDataset):
     def __init__(self, img_fns, skeleton_2d_dir, transforms=None, crop_size=(512, 512), out_size=(256, 256), downsample=8, sigma=3, mode='E'):
@@ -195,18 +187,14 @@ class Human36M2DTo3DDataset(Human36MBaseDataset):
 
     def __getitem__(self, index):
         _, subset, action, frame = self._get_img_info(index)
-        #skeleton_2d = self._prepare_skeleton_2d(subset, action, frame)
         skeleton_3d = self._prepare_skeleton_3d(subset, action, frame)
-        #skeleton_2d, skeleton_3d = self.transforms(skeleton_2d, skeleton_3d, **self.transforms_params)
-        project_matrix = get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
+        project_matrix = self._get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
         skeleton_2d = project_pos3d_to_pos2d(skeleton_3d, project_matrix)
         skeleton_2d = normalize_screen_coordinates(skeleton_2d, 1000, 1000)
-        R, t = get_camera(self.camera_parameters, subset, action.split('.')[1])
+        R, t = self._get_camera(self.camera_parameters, subset, action.split('.')[1])
         #skeleton_3d = skeleton_3d @ R + t
         skeleton_3d = skeleton_3d / 1000
         skeleton_3d[:,:] -= skeleton_3d[:1,:]
-        #camera = normalize_camera(camera, (1000, 1000))
-        #skeleton_3d = transform_pos3d(skeleton_3d, camera)
         return torch.from_numpy(skeleton_2d), torch.from_numpy(skeleton_3d), project_matrix, R, t
 
 class Human36M2DTemporalDataset(Human36MBaseDataset):
@@ -223,7 +211,6 @@ class Human36M2DTemporalDataset(Human36MBaseDataset):
         skeleton_2d_seq = []
         for i in range(self.length):
             img_fn_new = '_'.join(img_fn.split('_')[:-1]) + f'_{(frame+5*i):0>6d}.jpg'
-            #print(f'The {i}-th image. Frame:{frame}, File name: {img_fn_new}, Origin name: {img_fn}')
             if img_fn_new in self.img_fns:
                 img_new = self._prepare_img(img_fn_new)
                 skeleton_2d = self._prepare_skeleton_2d(subset, action, frame+5*i)
@@ -253,7 +240,7 @@ class Human36M2DTemporalDataset(Human36MBaseDataset):
         elif self.mode == 'classification' or self.mode == 'C':
             label = action.split('.')[0].split(' ')[0]
             label = Human36MMetadata.classes[label]
-            return torch.from_numpy(img_seq.transpose(0, 3, 1, 2)), torch.tensor(label, dtype=torch.long)
+            return torch.from_numpy(img_seq.transpose(0, 3, 1, 2)), torch.from_numpy(skeleton_2d_seq), torch.tensor(label, dtype=torch.long)
         else:
             raise NotImplementedError
 
@@ -270,14 +257,12 @@ class Human36M2DTo3DTemporalDataset(Human36MBaseDataset):
         skeleton_3d_seq = []
         for i in range(self.length):
             img_fn_new = '_'.join(img_fn.split('_')[:-1]) + f'_{(frame+5*i):0>6d}.jpg'
-            #print(f'The {i}-th image. Frame:{frame}, File name: {img_fn_new}, Origin name: {img_fn}')
             if img_fn_new in self.img_fns:
                 skeleton_3d = self._prepare_skeleton_3d(subset, action, frame+5*i)
-                project_matrix = get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
+                project_matrix = self._get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
                 skeleton_2d = project_pos3d_to_pos2d(skeleton_3d, project_matrix)
                 skeleton_2d = normalize_screen_coordinates(skeleton_2d, 1000, 1000)
-                R, t = get_camera(self.camera_parameters, subset, action.split('.')[1])
-                #skeleton_3d = (skeleton_3d - t) @ R.T
+                R, t = self._get_camera(self.camera_parameters, subset, action.split('.')[1])
                 skeleton_3d /= 1000
                 skeleton_3d[:,:] -= skeleton_3d[:1,:]
             else:
@@ -289,19 +274,12 @@ class Human36M2DTo3DTemporalDataset(Human36MBaseDataset):
     
         skeleton_2d_seq = np.stack(skeleton_2d_seq)
         skeleton_3d_seq = np.stack(skeleton_3d_seq)
-        #zeros = np.zeros_like(skeleton_3d_seq[0:1,...])
-        #skeleton_3d_seq = np.concatenate([zeros, skeleton_3d_seq], axis=0)
 
-        project_matrix = get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
+        project_matrix = self._get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
 
         return torch.from_numpy(skeleton_2d_seq), torch.from_numpy(skeleton_3d_seq), project_matrix, R, t
 
 
-    
-
-# TODO:
-# class Human36MUnsupervised3DDataset(Human36MBaseDataset): # For pose embedding
-# return 2 3D skeletons from the same video sequence with label "1" or from different video sequence with label "0"
 
 if __name__ == '__main__':
     from glob import glob
@@ -318,26 +296,3 @@ if __name__ == '__main__':
 
     print(pos2ds)
     print(pos3ds)
-    
-    #img, hmap, _ = train_dataset[0]
-    #print(img.shape)
-    #print(hmap.shape)
-    #img, skeleton, hmap = train_dataset[907]
-    #print(img.shape)
-    #print(hmap.shape)
-
-    #root_path = '/scratch/PI/cqf/datasets/h36m'
-    #img_path = root_path + '/img'
-    #pos2d_path = root_path + '/pos2d'
-    #pos3d_path = root_path + '/pos3d'
-
-    #img_fns = glob(img_path+'/*.jpg')
-    #split = int(0.8*len(img_fns))
-    #train_fns = img_fns[:10000]
-    #val_fns = img_fns[10000:12000]
-
-    #dataset = Human36M2DTo3DDataset(img_fns, pos2d_path, pos3d_path, transforms=None)
-    #pos2d, pos3d = dataset[0]
-    #print(pos2d.shape)
-    #print(pos3d.shape)
-    #pos3d_preprocess('/scratch/PI/cqf/datasets/h36m/pos3d/', '/scratch/PI/cqf/datasets/h36m/pos3d_orig/')
