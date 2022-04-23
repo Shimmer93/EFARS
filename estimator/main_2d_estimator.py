@@ -28,8 +28,9 @@ pos2d_path = root_path + '/pos2d'
 img_fns = glob(img_path+'/*.jpg')
 split = int(0.8*len(img_fns))
 random.shuffle(img_fns)
-train_fns = img_fns[:100]
-val_fns = img_fns[100:120]
+train_fns = img_fns[:10000]
+val_fns = img_fns[10000:12000]
+test_fns = img_fns[12000:14000]
 
 def train_transforms(img, pos2d):
     #x_min, y_min, x_max, y_max = get_random_crop_positions_with_pos2d(img, pos2d, kwargs['crop_size'])
@@ -60,12 +61,14 @@ def val_transforms(img, pos2d):
     return img, pos2d
 
 train_dataset = Human36M2DPoseDataset(train_fns, pos2d_path, transforms=train_transforms, 
-    out_size=(args.out_size, args.out_size), mode='E', sigma=args.sigma)
+    out_size=(args.out_size, args.out_size), mode='E', downsample=args.downsample, sigma=args.sigma)
 val_dataset = Human36M2DPoseDataset(val_fns, pos2d_path, transforms=val_transforms, 
-    out_size=(args.out_size, args.out_size), mode='E', sigma=args.sigma)
+    out_size=(args.out_size, args.out_size), mode='E', downsample=args.downsample, sigma=args.sigma)
+test_dataset = Human36M2DPoseDataset(test_fns, pos2d_path, transforms=val_transforms, 
+    out_size=(args.out_size, args.out_size), mode='E', downsample=args.downsample, sigma=args.sigma)
 
 if args.model == 'unipose':
-    net = UniPose(dataset='human3.6m', num_classes=17)
+    net = UniPose(dataset='human3.6m', num_classes=Human36MMetadata.num_joints)
 elif args.model == 'openpose':
     net = OpenPose()
 
@@ -73,21 +76,33 @@ num_gpus = torch.cuda.device_count()
 train_loader = torch.utils.data.DataLoader(
     train_dataset,
     batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    sampler=SequentialSampler(train_dataset),
-    pin_memory=False,
-    drop_last=True,
     num_workers=args.num_workers,
+    sampler=SequentialSampler(train_dataset),
+    drop_last=True,
 )
-
 val_loader = torch.utils.data.DataLoader(
     val_dataset, 
     batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
     num_workers=args.num_workers,
-    shuffle=False,
     sampler=SequentialSampler(val_dataset),
-    pin_memory=False,
+    shuffle=False,
+)
+test_loader = torch.utils.data.DataLoader(
+    test_dataset, 
+    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
+    num_workers=args.num_workers,
+    sampler=SequentialSampler(test_dataset),
+    shuffle=False,
 )
 
 cfg = get_config(args, nn.MSELoss(), MPCK_MPCKh(), train_loader)
 fitter = PoseEstimation2DFitter(net, cfg)
-fitter.fit(train_loader, val_loader)
+
+if args.test:
+    fitter.test(test_loader, args.checkpoint)
+else:
+    if args.checkpoint != None:
+        fitter.load(args.checkpoint)
+    fitter.fit(train_loader, val_loader)
+    if args.test_after_train:
+        fitter.test(test_loader, f'{fitter.base_dir}/last-checkpoint.bin')

@@ -5,14 +5,14 @@ os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from glob import glob
 import random
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
-from models.sem_gcn import SemGCN
-from estimator.models.mlp import MLP
-from data.human36m import Human36M2DTo3DDataset, Human36MMetadata
+from models.attention import GCNTransformerModel, PureTransformerModel
+from models.video3d import TemporalModelOptimized1f
+
+from data.human36m import Human36M2DTo3DTemporalDataset, Human36MMetadata
 from utils.misc import seed_everything
 from utils.graph import adj_mx_from_edges
 from utils.parser import args
@@ -31,35 +31,51 @@ split = int(0.8*len(img_fns))
 random.shuffle(img_fns)
 train_fns = img_fns[:50000]
 val_fns = img_fns[50000:60000]
+test_fns = img_fns[10000:70000]
 
-train_dataset = Human36M2DTo3DDataset(train_fns, pos2d_path, pos3d_path)
-val_dataset = Human36M2DTo3DDataset(val_fns, pos2d_path, pos3d_path)
-
-if args.model == 'sem_gcn':
+train_dataset = Human36M2DTo3DTemporalDataset(train_fns, pos2d_path, pos3d_path, length=args.seq_len)
+val_dataset = Human36M2DTo3DTemporalDataset(val_fns, pos2d_path, pos3d_path, length=args.seq_len)
+test_dataset = Human36M2DTo3DTemporalDataset(val_fns, pos2d_path, pos3d_path, length=args.seq_len)
+    
+if args.model == 'gcn_trans_enc':
     adj = adj_mx_from_edges(Human36MMetadata.num_joints, Human36MMetadata.skeleton_edges, sparse=False)
-    net = SemGCN(adj=adj, num_layers=4, hid_dim=128)
-elif args.model == 'mlp':
-    net = MLP(num_joint=17)
+    net = GCNTransformerModel(adj=adj, num_layers=4, hid_dim=args.hid_dim)
+elif args.model == 'trans_enc':
+    net = PureTransformerModel(args.hid_dim)
+elif args.model == 'videopose3d':
+    net = TemporalModelOptimized1f(Human36MMetadata.num_joints, 2, Human36MMetadata.num_joints, [1,1,1,1,1])
 
 num_gpus = torch.cuda.device_count()
 train_loader = torch.utils.data.DataLoader(
     train_dataset,
     batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
+    num_workers=args.num_workers,
     sampler=SequentialSampler(train_dataset),
     pin_memory=False,
-    drop_last=True,
-    num_workers=args.num_workers,
 )
-
 val_loader = torch.utils.data.DataLoader(
     val_dataset, 
     batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
     num_workers=args.num_workers,
-    shuffle=False,
     sampler=SequentialSampler(val_dataset),
-    pin_memory=False,
+    shuffle=False,
+)
+test_loader = torch.utils.data.DataLoader(
+    test_dataset, 
+    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
+    num_workers=args.num_workers,
+    sampler=SequentialSampler(test_dataset),
+    shuffle=False,
 )
 
 cfg = get_config(args, nn.MSELoss(), MPJPE_PMPJPE(), train_loader)
 fitter = Pose2Dto3DFitter(net, cfg)
-fitter.fit(train_loader, val_loader)
+
+if args.test:
+    fitter.test(test_loader, args.checkpoint)
+else:
+    if args.checkpoint != None:
+        fitter.load(args.checkpoint)
+    fitter.fit(train_loader, val_loader)
+    if args.test_after_train:
+        fitter.test(test_loader, f'{fitter.base_dir}/last-checkpoint.bin')

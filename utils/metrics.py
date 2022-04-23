@@ -179,24 +179,45 @@ def p_mpjpe(predicted, target):
     # Return MPJPE
     return np.mean(np.linalg.norm(predicted_aligned - target_new, axis=len(target_new.shape) - 1))
 
+def n_mpjpe(predicted, target):
+    """
+    Normalized MPJPE (scale only), adapted from:
+    https://github.com/hrhodin/UnsupervisedGeometryAwareRepresentationLearning/blob/master/losses/poses.py
+    """
+    assert predicted.shape == target.shape
+
+    if len(predicted.shape) == 4:
+        B, T, N, D = predicted.shape
+        predicted_new = predicted.reshape(B * T, N, D)
+        target_new = target.reshape(B * T, N, D)
+    else:
+        predicted_new = predicted
+        target_new = target
+
+    norm_predicted = torch.mean(torch.sum(predicted_new ** 2, dim=3, keepdim=True), dim=2, keepdim=True)
+    norm_target = torch.mean(torch.sum(target_new * predicted_new, dim=3, keepdim=True), dim=2, keepdim=True)
+    scale = norm_target / norm_predicted
+    return mpjpe(scale * predicted_new, target_new)
+
 
 class Accuracy:
     def __call__(self, preds, labels):
         return (preds.argmax(dim=-1) == labels).float().mean()
 
-class MPCK_MPCKh:
+class MAP_MPCK_MPCKh:
     def __init__(self, thr_pck=0.2, thr_pckh=0.5):
         self.thr_pck = thr_pck
         self.thr_pckh = thr_pckh
     def __call__(self, preds, targets):
         preds_array = preds.cpu().detach().numpy()
         targets_array = targets.cpu().detach().numpy()
-        _, PCK, PCKh, _, _, _ = accuracy_2d_pose(preds_array, targets_array, 0.2, 0.5)
-        return torch.tensor([PCK.mean(), PCKh.mean()])
+        ACC, PCK, PCKh, _, _, _ = accuracy_2d_pose(preds_array, targets_array, 0.2, 0.5)
+        return torch.tensor([ACC.mean(), PCK.mean(), PCKh.mean()])
 
-class MPJPE_PMPJPE:
+class MPJPE_PMPJPE_NMPJPE:
     def __call__(self, preds, targets):
         mPJPE = mpjpe(preds.detach(), targets.detach())
         pmPJPE = p_mpjpe(preds.cpu().detach().numpy(), targets.cpu().detach().numpy())
         pmPJPE = torch.tensor(pmPJPE)
-        return torch.tensor([mPJPE, pmPJPE])
+        nmPJPE = n_mpjpe(preds.detach(), targets.detach())
+        return torch.tensor([mPJPE, pmPJPE, nmPJPE])

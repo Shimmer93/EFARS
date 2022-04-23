@@ -1,3 +1,4 @@
+from calendar import c
 import sys
 sys.path.insert(1, '/home/samuel/EFARS/')
 
@@ -8,13 +9,14 @@ from glob import glob
 from datetime import datetime
 import time
 
-from utils.misc import AverageMeter
+from utils.misc import AverageMeter, count_parameters_in_MB
 
 
 class Fitter:
     def __init__(self, model, config):
         self.config = config
         self.epoch = 0
+        self.batch_size = config.batch_size
 
         self.base_dir = f'checkpoints/{config.folder}'
         if not os.path.exists(self.base_dir):
@@ -43,9 +45,10 @@ class Fitter:
                  f'Batch Size: {self.config.batch_size}, ' + \
                  f'Epochs: {self.config.n_epochs}')
 
-        if self.config.cuda and torch.cuda.device_count() > 1:
+        if self.config.cuda:
             print(f"DataParallel is used. Number of GPUs: {torch.cuda.device_count()}")
             self.model = nn.DataParallel(self.model)
+            self.batch_size //= torch.cuda.device_count()
 
     def fit(self, train_loader, validation_loader):
         for _ in range(self.config.n_epochs):
@@ -90,8 +93,8 @@ class Fitter:
                           f'Metrics: {summary_metrics.avg}, Time: {(time.time() - t):.5f}', end='\r')
 
             loss, metrics = self.compute_loss_and_metrics(data, train=True)
-            summary_loss.update(loss.detach().item(), self.config.batch_size // torch.cuda.device_count())
-            summary_metrics.update(metrics.cpu().detach().numpy(), self.config.batch_size // torch.cuda.device_count())
+            summary_loss.update(loss.detach().item(), self.batch_size)
+            summary_metrics.update(metrics.cpu().detach().numpy(), self.batch_size)
 
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer) # native fp16
@@ -117,14 +120,33 @@ class Fitter:
             with torch.no_grad():
                 loss, metrics = self.compute_loss_and_metrics(data, train=False)
 
-            summary_loss.update(loss.detach().item(), self.config.batch_size // torch.cuda.device_count())
-            summary_metrics.update(metrics.cpu().detach().numpy(), self.config.batch_size // torch.cuda.device_count())
+            summary_loss.update(loss.detach().item(), self.batch_size)
+            summary_metrics.update(metrics.cpu().detach().numpy(), self.batch_size)
 
         return summary_loss, summary_metrics
 
-    def test(self, test_loader):
-        self.log('Finished training. Start testing...')
-        return self.validate(test_loader)
+    def test(self, test_loader, checkpoint):
+        self.load(checkpoint, only_model=True)
+        self.model.eval()
+        print(f'Testing checkpoint \'{checkpoint}\'')
+        print(f'Params count: {count_parameters_in_MB(self.model)}')
+        summary_loss = AverageMeter()
+        summary_metrics = AverageMeter()
+        t = time.time()
+        for step, data in enumerate(test_loader):
+            if self.config.verbose:
+                if step % self.config.verbose_step == 0:
+                    print(f'Test Step {step}/{len(test_loader)}, Loss: {summary_loss.avg:.8f}, ' + \
+                          f'Metrics: {summary_metrics.avg}, Time: {(time.time() - t):.5f}', end='\r')
+
+            with torch.no_grad():
+                loss, metrics = self.compute_loss_and_metrics(data, train=False)
+
+            summary_loss.update(loss.detach().item(), self.batch_size)
+            summary_metrics.update(metrics.cpu().detach().numpy(), self.batch_size)
+
+        print(f'[RESULT]: Test. Loss: {summary_loss.avg:.8f}, ' + \
+              f'Metrics: {summary_metrics.avg}, Time: {(time.time() - t):.5f}')
 
     def compute_loss_and_metrics(self, data, train):
         return 0, 0
@@ -141,7 +163,21 @@ class Fitter:
 
     def load(self, path, only_model=False):
         checkpoint = torch.load(path)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
+        state_dict = checkpoint['model_state_dict']
+        first_name = state_dict.keys()[0]
+        model_parallel = self.model.__class__.__name__ == 'DataParallel'
+        load_parallel = 'module' in first_name
+        if model_parallel == load_parallel:
+            self.model.load_state_dict(state_dict)
+        elif model_parallel and not load_parallel:
+            self.model.module.load_state_dict(state_dict)
+        else:
+            from collections import OrderedDict
+            new_state_dict = OrderedDict()
+            for name, params in state_dict:
+                new_state_dict[name[7:]] = params
+            self.model.load_state_dict(state_dict)
+
         if not only_model:
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -241,6 +277,7 @@ def get_config(args, criterion, metrics, data_loader):
     cfg.num_workers = args.num_workers
     cfg.batch_size = args.batch_size * torch.cuda.device_count()
     cfg.n_epochs = args.n_epochs
+    cfg.cuda = torch.cuda.is_available()
     cfg.folder = args.output_path
     cfg.lr = args.lr
     cfg.criterion = criterion

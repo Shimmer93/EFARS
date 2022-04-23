@@ -1,5 +1,3 @@
-import albumentations as A
-from albumentations.pytorch.transforms import ToTensorV2
 import numpy as np
 import cv2 as cv
 from scipy.ndimage.filters import gaussian_filter
