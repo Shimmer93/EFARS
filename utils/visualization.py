@@ -4,7 +4,7 @@ import cv2 as cv
 from scipy.ndimage.filters import gaussian_filter
 import numpy as np
 import matplotlib.pyplot as plt
-from utils.transform import project_pos3d_to_pos2d, hmap_to_pos2d
+from utils.conversion import project_pos3d_to_pos2d, hmap_to_pos2d
 
 def prepare_img(img, denormalize=None):
     img_array = img.detach().numpy().copy()

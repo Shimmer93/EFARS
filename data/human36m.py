@@ -12,8 +12,8 @@ import cdflib
 import os
 from scipy.ndimage import gaussian_filter
 import json
-from utils.visualization import project_pos3d_to_pos2d
-from utils.transform import normalize_screen_coordinates, image_coordinates
+from utils.conversion import project_pos3d_to_pos2d
+from utils.misc import normalize_screen_coordinates, image_coordinates
 
 def pos2d_preprocess(input_dir, output_dir=None):
     if output_dir is None:
@@ -67,11 +67,6 @@ class Human36MBaseDataset(Dataset):
         self.skeleton_2d_dir = skeleton_2d_dir
         self.skeleton_3d_dir = skeleton_3d_dir
         self.transforms = transforms
-        self.transforms_params = {
-            'out_size': out_size,
-            'mean': Human36MMetadata.mean,
-            'std': Human36MMetadata.std
-        }
         self.out_size = out_size
         self.downsample = downsample
         self.sigma = sigma
@@ -129,7 +124,8 @@ class Human36MBaseDataset(Dataset):
             hmap[:, :, i] = gaussian_filter(hmap[:, :, i], sigma=self.sigma)
         hmap[hmap > 1] = 1
         hmap[hmap < 0.001] = 0
-        hmap = cv.resize(hmap, (self.out_size[0]//self.downsample, self.out_size[1]//self.downsample), cv.INTER_LINEAR)
+        hmap /= hmap.max()
+        hmap = cv.resize(hmap, (self.out_size[0]//self.downsample, self.out_size[1]//self.downsample), cv.INTER_AREA)
         hmap = hmap.transpose(2, 0, 1)
         return hmap
 
@@ -149,16 +145,15 @@ class Human36MBaseDataset(Dataset):
         return np.array(R), np.array(t).T
 
 class Human36M2DPoseDataset(Human36MBaseDataset):
-    def __init__(self, img_fns, skeleton_2d_dir, transforms=None, crop_size=(512, 512), out_size=(256, 256), downsample=8, sigma=3, mode='E'):
+    def __init__(self, img_fns, skeleton_2d_dir, transforms=None, out_size=(256, 256), downsample=8, sigma=3, mode='E'):
         super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, transforms=transforms, out_size=out_size, downsample=downsample, sigma=sigma)
-        self.transforms_params['crop_size'] = crop_size
         self.mode = mode
 
     def __getitem__(self, index):
         img_fn, subset, action, frame = self._get_img_info(index)
         img = self._prepare_img(img_fn)
         skeleton_2d = self._prepare_skeleton_2d(subset, action, frame)
-        img, skeleton_2d = self.transforms(img, skeleton_2d, **self.transforms_params)
+        img, skeleton_2d = self.transforms(img, skeleton_2d)
         if self.mode == 'estimation' or self.mode == 'E':
             hmap = self._generate_hmap(skeleton_2d)
             return ToTensor()(img), torch.from_numpy(hmap), torch.from_numpy(skeleton_2d)
@@ -192,15 +187,13 @@ class Human36M2DTo3DDataset(Human36MBaseDataset):
         skeleton_2d = project_pos3d_to_pos2d(skeleton_3d, project_matrix)
         skeleton_2d = normalize_screen_coordinates(skeleton_2d, 1000, 1000)
         R, t = self._get_camera(self.camera_parameters, subset, action.split('.')[1])
-        #skeleton_3d = skeleton_3d @ R + t
         skeleton_3d = skeleton_3d / 1000
         skeleton_3d[:,:] -= skeleton_3d[:1,:]
         return torch.from_numpy(skeleton_2d), torch.from_numpy(skeleton_3d), project_matrix, R, t
 
 class Human36M2DTemporalDataset(Human36MBaseDataset):
-    def __init__(self, img_fns, skeleton_2d_dir, transforms=None, crop_size=(512, 512), out_size=(256,256), downsample=8, sigma=3, mode='E', length=5):
+    def __init__(self, img_fns, skeleton_2d_dir, transforms=None, out_size=(256,256), downsample=8, sigma=3, mode='E', length=5):
         super().__init__(img_fns=img_fns, skeleton_2d_dir=skeleton_2d_dir, transforms=transforms, out_size=out_size, downsample=downsample, sigma=sigma)
-        self.transforms_params['crop_size'] = crop_size
         self.mode = mode
         self.length = length
 
@@ -229,7 +222,7 @@ class Human36M2DTemporalDataset(Human36MBaseDataset):
         img_seq = img_seq.transpose(1, 2, 0, 3).reshape(h, w, t*c)
         _, n, d = skeleton_2d_seq.shape
         skeleton_2d_seq = skeleton_2d_seq.reshape(t*n, d)
-        img_seq, skeleton_2d_seq = self.transforms(img_seq, skeleton_2d_seq, **self.transforms_params)
+        img_seq, skeleton_2d_seq = self.transforms(img_seq, skeleton_2d_seq)
         img_seq = img_seq.reshape(self.out_size[0], self.out_size[1], t, c).transpose(2, 0, 1, 3)
         skeleton_2d_seq = skeleton_2d_seq.reshape(t, n, d)
 
@@ -262,7 +255,6 @@ class Human36M2DTo3DTemporalDataset(Human36MBaseDataset):
                 project_matrix = self._get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
                 skeleton_2d = project_pos3d_to_pos2d(skeleton_3d, project_matrix)
                 skeleton_2d = normalize_screen_coordinates(skeleton_2d, 1000, 1000)
-                R, t = self._get_camera(self.camera_parameters, subset, action.split('.')[1])
                 skeleton_3d /= 1000
                 skeleton_3d[:,:] -= skeleton_3d[:1,:]
             else:
@@ -275,24 +267,7 @@ class Human36M2DTo3DTemporalDataset(Human36MBaseDataset):
         skeleton_2d_seq = np.stack(skeleton_2d_seq)
         skeleton_3d_seq = np.stack(skeleton_3d_seq)
 
+        R, t = self._get_camera(self.camera_parameters, subset, action.split('.')[1])
         project_matrix = self._get_project_matrix(self.camera_parameters, subset, action.split('.')[1])
 
         return torch.from_numpy(skeleton_2d_seq), torch.from_numpy(skeleton_3d_seq), project_matrix, R, t
-
-
-
-if __name__ == '__main__':
-    from glob import glob
-    import sys
-    sys.path.append('/home/samuel/EFARS')
-    from utils.transform import do_pos2d_train_transforms, do_2d_to_3d_transforms
-    from utils.visualization import project_pos3d_to_pos2d
-    img_fns = glob('/home/samuel/h36m/imgs/*.jpg')
-    train_dataset = Human36M2DTo3DDataset(img_fns, '/home/samuel/h36m/pos2d', '/home/samuel/h36m/pos3d')
-    pos2ds, pos3ds, P = train_dataset[87878]
-
-    print(pos2ds.shape)
-    print(pos3ds.shape)
-
-    print(pos2ds)
-    print(pos3ds)

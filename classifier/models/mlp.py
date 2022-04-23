@@ -47,9 +47,9 @@ class Linear(nn.Module):
 
         return out
 
-# In: B x 17 x 3
+# In: B x 3 x 1 x 17 x 1 
 # Output: B x C
-# B: Batch size, T: Length of Time Sequence, C: Number of classes
+# B: Batch size, C: Number of classes
 class MLP(nn.Module):
     def __init__(self,
                  num_joint,
@@ -86,8 +86,10 @@ class MLP(nn.Module):
             self._load_pretrained_model()
 
     def forward(self, x):
+        x_new = x.squeeze().transpose(1, 2)
+
         # pre-processing
-        y = self.w1(x.reshape((x.shape[0], -1)))
+        y = self.w1(x_new.reshape((x_new.shape[0], -1)))
 
         # linear layers
         for i in range(self.num_stage):
@@ -103,11 +105,11 @@ class MLP(nn.Module):
         checkpoint = load_checkpoint(load_dir='/home/zpengac/pose/EFARS/estimator/best.pth.tar', pick_best=True)
         self.load_state_dict(checkpoint['model_state_dict'])
 
-# In: B x T x 17 x 3
+# In: B x 3 x T x 17 x 1
 # Output: B x C
 # B: Batch size, T: Length of Time Sequence, C: Number of classes
 class MLPTransformerModel(nn.Module):
-    def __init__(self, hid_dim, num_joint, num_classes, seq_len):
+    def __init__(self, hid_dim, num_joint, num_classes):
         super(MLPTransformerModel, self).__init__()
         self.mlp = MLP(num_joint, hid_dim)
         encoder_layers = nn.TransformerEncoderLayer(d_model=hid_dim, nhead=8, batch_first=True, dropout=0.1)
@@ -120,10 +122,11 @@ class MLPTransformerModel(nn.Module):
         self.init_params()
 
     def forward(self, xs):
-        b, t, n, _ = xs.shape
+        xs_new = xs.squeeze().permute(0, 2, 3, 1)
+        b, t, n, _ = xs_new.shape
         ys = []
         for i in range(t):
-            y = self.mlp(xs[:,i,:,:])
+            y = self.mlp(xs_new[:,i,:,:])
             ys.append(y)
         ys = torch.stack(ys, dim=1)
         ys = self.encoder(ys)

@@ -1,24 +1,23 @@
 import sys
 sys.path.insert(1, '/home/samuel/EFARS/')
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
-import os
 from glob import glob
-from tqdm import tqdm
 import random
-from datetime import datetime
-import time
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
+import albumentations as A
 
 from models.openpose import OpenPose
 from models.unipose import UniPose
-from data.human36m import Human36M2DPoseDataset
-from utils.transform import do_pos2d_train_transforms, do_pos2d_val_transforms
-from utils.misc import AverageMeter, seed_everything
+from data.human36m import Human36M2DPoseDataset, Human36MMetadata
+from utils.misc import seed_everything, normalize, get_random_crop_positions_with_pos2d
 from utils.parser import args
+from utils.fitter import PoseEstimation2DFitter, get_config
+from utils.metrics import MPCK_MPCKh
 
 seed_everything(args.seed)
 
@@ -29,232 +28,66 @@ pos2d_path = root_path + '/pos2d'
 img_fns = glob(img_path+'/*.jpg')
 split = int(0.8*len(img_fns))
 random.shuffle(img_fns)
-train_fns = img_fns[:10000]
-val_fns = img_fns[10000:12000]
+train_fns = img_fns[:100]
+val_fns = img_fns[100:120]
 
-train_dataset = Human36M2DPoseDataset(train_fns, pos2d_path, transforms=do_pos2d_train_transforms, out_size=(256,256), mode='E', sigma=args.sigma)
-val_dataset = Human36M2DPoseDataset(val_fns, pos2d_path, transforms=do_pos2d_val_transforms, out_size=(256,256), mode='E', sigma=args.sigma)
+def train_transforms(img, pos2d):
+    #x_min, y_min, x_max, y_max = get_random_crop_positions_with_pos2d(img, pos2d, kwargs['crop_size'])
+    transforms = A.Compose([
+        #A.Crop(x_min, y_min, x_max, y_max, p=0.5),
+        #A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2, p=0.9),
+        #A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.9),
+        #A.Blur(blur_limit=3,p=0.2),
+        #A.HorizontalFlip(p=0.5),
+        A.Resize(height=args.out_size, width=args.out_size, p=1)
+    ], keypoint_params=A.KeypointParams(format='xy'))
 
-class Fitter:
-    def __init__(self, model, device, config):
-        self.config = config
-        self.epoch = 0
+    transformed = transforms(image=img, keypoints=pos2d)
+    img = transformed['image']
+    img = normalize(img, Human36MMetadata.mean, Human36MMetadata.std)
+    pos2d = np.array(transformed['keypoints'])
+    return img, pos2d
 
-        self.base_dir = f'/home/samuel/EFARS/estimator/checkpoints/{config.folder}'
-        if not os.path.exists(self.base_dir):
-            os.makedirs(self.base_dir)
-        
-        self.log_path = f'{self.base_dir}/log.txt'
-        self.best_summary_loss = 10**5
+def val_transforms(img, pos2d):
+    transforms = A.Compose([
+        A.Resize(height=args.out_size, width=args.out_size, p=1)
+    ], keypoint_params=A.KeypointParams(format='xy'))
 
-        self.model = model
-        if torch.cuda.device_count() > 1:
-            print("Let's use", torch.cuda.device_count(), "GPUs!")
-            # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-            self.model = nn.DataParallel(self.model, device_ids=[0])
-        self.device = device
+    transformed = transforms(image=img, keypoints=pos2d)
+    img = transformed['image']
+    img = normalize(img, Human36MMetadata.mean, Human36MMetadata.std)
+    pos2d = np.array(transformed['keypoints'])
+    return img, pos2d
 
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.lr)
-        self.scaler = torch.cuda.amp.GradScaler()
-        
-        self.scheduler = config.SchedulerClass(self.optimizer, **config.scheduler_params)
-        self.criterion = nn.MSELoss().cuda()
-        self.log(f'Fitter prepared. Device is {self.device}')
-        
-        # self.iters_to_accumulate = 4 # gradient accumulation
-
-    def fit(self, train_loader, validation_loader):
-        for e in range(self.config.n_epochs):
-            if self.config.verbose:
-                lr = self.optimizer.param_groups[0]['lr']
-                timestamp = datetime.utcnow().isoformat()
-                self.log(f'\n{timestamp}\nLR: {lr}')
-
-            t = time.time()
-            summary_loss = self.train_one_epoch(train_loader)
-
-            self.log(f'[RESULT]: Train. Epoch: {self.epoch}, mse_loss: {summary_loss.avg:.8f}, time: {(time.time() - t):.5f}')
- 
-            self.save(f'{self.base_dir}/last-checkpoint.bin')
-
-            t = time.time()
-            summary_loss = self.validation(validation_loader)
-
-            self.log(f'[RESULT]: Val. Epoch: {self.epoch}, mse_loss: {summary_loss.avg:.8f}, time: {(time.time() - t):.5f}')
-
-            if summary_loss.avg < self.best_summary_loss:
-                self.best_summary_loss = summary_loss.avg
-                self.model.eval()
-                self.save(f'{self.base_dir}/best-checkpoint-{str(self.epoch).zfill(3)}epoch.bin')
-                for path in sorted(glob(f'{self.base_dir}/best-checkpoint-*epoch.bin'))[:-3]:
-                    os.remove(path)
-
-            if self.config.validation_scheduler:
-                self.scheduler.step(metrics=summary_loss.avg)
-
-            self.epoch += 1
-
-    def validation(self, val_loader):
-        self.model.eval()
-        mse_loss = AverageMeter()
-        t = time.time()
-        for step, (imgs, hmaps, skeletons) in enumerate(val_loader):
-            if self.config.verbose:
-                if step % self.config.verbose_step == 0:
-                    print(
-                        f'Val Step {step}/{len(val_loader)}, ' + \
-                        f'mse_loss: {mse_loss.avg:.8f}, ' + \
-                        f'time: {(time.time() - t):.5f}', end='\r'
-                    )
-
-            with torch.no_grad():
-                imgs = imgs.cuda().float()
-                hmaps = hmaps.cuda().float()
-                batch_size = imgs.shape[0]
-                 
-                with torch.cuda.amp.autocast():
-                    preds = self.model(imgs)
-                    loss = self.criterion(preds,hmaps)
-
-            mse_loss.update(loss.detach().item(), batch_size)
-            #self.scaler.scale(loss).backward()
-
-        return mse_loss
-
-    def train_one_epoch(self, train_loader):
-        self.model.train()
-        mse_loss = AverageMeter()
-        t = time.time()
-        for step, (imgs, hmaps, skeletons) in enumerate(train_loader):
-            if self.config.verbose:
-                if step % self.config.verbose_step == 0:
-                    print(
-                        f'Train Step {step}/{len(train_loader)}, ' + \
-                        f'mse_loss: {mse_loss.avg:.8f}, ' + \
-                        f'time: {(time.time() - t):.5f}', end='\r'
-                    )
-            imgs = imgs.cuda().float()
-            hmaps = hmaps.cuda().float()
-            hmaps_sum = hmaps.sum(dim=1).unsqueeze(1)
-            hmaps_minus = torch.clamp(1 - hmaps_sum, 0, 1)
-            hmaps = torch.cat((hmaps, hmaps_minus), dim=1)
-            batch_size = imgs.shape[0]
-            
-            with torch.cuda.amp.autocast():
-                preds = self.model(imgs)
-                loss = self.criterion(preds,hmaps)
-
-            mse_loss.update(loss.detach().item(), batch_size)
-            self.scaler.scale(loss).backward()
-            # loss = loss / self.iters_to_accumulate # gradient accumulation
-            
-            #mse_loss.update(loss.detach().item(), batch_size)
-            
-            #self.optimizer.step()
-            self.scaler.step(self.optimizer) # native fp16
-            
-            if self.config.step_scheduler:
-                self.scheduler.step()
-            
-            self.scaler.update() #native fp16
-                
-                
-#             if (step+1) % self.iters_to_accumulate == 0: # gradient accumulation
-
-#                 self.optimizer.step()
-#                 self.optimizer.zero_grad()
-
-#                 if self.config.step_scheduler:
-#                     self.scheduler.step()
-
-        return mse_loss
-
-    
-    def save(self, path):
-        self.model.eval()
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
-            'best_summary_loss': self.best_summary_loss,
-            'epoch': self.epoch,
-            #'amp': amp.state_dict() # apex
-        }, path)
-
-    def load(self, path):
-        checkpoint = torch.load(path)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        self.best_summary_loss = checkpoint['best_summary_loss']
-        self.epoch = checkpoint['epoch'] + 1
-        
-    def log(self, message):
-        if self.config.verbose:
-            print(message)
-        with open(self.log_path, 'a+') as logger:
-            logger.write(f'{message}\n')
-            
-            
-class TrainGlobalConfig:
-    num_workers = args.num_workers
-    batch_size = args.batch_size * torch.cuda.device_count()
-    n_epochs = args.n_epochs
-
-    folder = args.output_path
-    lr = args.max_lr
-
-    # -------------------
-    verbose = True
-    verbose_step = 1
-    # -------------------
-
-    # --------------------
-    step_scheduler = False  # do scheduler.step after optimizer.step
-    validation_scheduler = True  # do scheduler.step after validation stage loss
-
-    SchedulerClass = torch.optim.lr_scheduler.ReduceLROnPlateau # #OneCycleLR #ReduceLROnPlateau
-    scheduler_params = dict(
-        patience=5,
-        factor=0.1,
-        #max_lr=args.max_lr,
-        ##total_steps = len(train_dataset) // 4 * n_epochs, # gradient accumulation
-        #epochs=n_epochs,
-        #steps_per_epoch=int(len(train_dataset) / batch_size),
-        #pct_start=args.pct_start,
-        #anneal_strategy=args.anneal_strategy, 
-        #final_div_factor=args.final_div_factor
-    )
+train_dataset = Human36M2DPoseDataset(train_fns, pos2d_path, transforms=train_transforms, 
+    out_size=(args.out_size, args.out_size), mode='E', sigma=args.sigma)
+val_dataset = Human36M2DPoseDataset(val_fns, pos2d_path, transforms=val_transforms, 
+    out_size=(args.out_size, args.out_size), mode='E', sigma=args.sigma)
 
 if args.model == 'unipose':
-    net = UniPose(dataset='human3.6m',num_classes=17).cuda()
+    net = UniPose(dataset='human3.6m', num_classes=17)
 elif args.model == 'openpose':
-    net = OpenPose().cuda()
+    net = OpenPose()
 
-def run_training():
-    device = torch.device('cuda')
+num_gpus = torch.cuda.device_count()
+train_loader = torch.utils.data.DataLoader(
+    train_dataset,
+    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
+    sampler=SequentialSampler(train_dataset),
+    pin_memory=False,
+    drop_last=True,
+    num_workers=args.num_workers,
+)
 
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=TrainGlobalConfig.batch_size,
-        sampler=SequentialSampler(train_dataset),
-        pin_memory=False,
-        drop_last=True,
-        num_workers=TrainGlobalConfig.num_workers,
-    )
+val_loader = torch.utils.data.DataLoader(
+    val_dataset, 
+    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
+    num_workers=args.num_workers,
+    shuffle=False,
+    sampler=SequentialSampler(val_dataset),
+    pin_memory=False,
+)
 
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset, 
-        batch_size=TrainGlobalConfig.batch_size,
-        num_workers=TrainGlobalConfig.num_workers,
-        shuffle=False,
-        sampler=SequentialSampler(val_dataset),
-        pin_memory=False,
-    )
-
-    fitter = Fitter(model=net, device=device, config=TrainGlobalConfig)
-    #fitter.load(f'{fitter.base_dir}/last-checkpoint.bin')
-    fitter.fit(train_loader, val_loader)
-    
-    
-run_training()
+cfg = get_config(args, nn.MSELoss(), MPCK_MPCKh(), train_loader)
+fitter = PoseEstimation2DFitter(net, cfg)
+fitter.fit(train_loader, val_loader)

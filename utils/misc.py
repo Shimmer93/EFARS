@@ -2,6 +2,9 @@ import random
 import os
 import numpy as np
 import torch
+from glob import glob
+from tqdm import tqdm
+import cdflib
 
 def count_parameters_in_MB(model):
     return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name) / 1e6
@@ -32,165 +35,71 @@ def seed_everything(seed):
      torch.backends.cudnn.deterministic = True
      torch.backends.cudnn.benchmark = True
 
-def get_max_preds(batch_hmaps):
-	batch_size = batch_hmaps.shape[0]
-	num_joints = batch_hmaps.shape[1]
-	width      = batch_hmaps.shape[3]
+def normalize(img, mean, std):
+    for i in range(img.shape[-1]):
+        img[...,i] = (img[...,i] - mean[i]) / std[i]
+    return img
 
-	hmaps_reshaped = batch_hmaps.reshape((batch_size, num_joints, -1))
-	idx               = np.argmax(hmaps_reshaped, 2)
-	maxvals           = np.amax(hmaps_reshaped, 2)
+def denormalize(img, mean, std):
+    for i in range(img.shape[-1]):
+        img[...,i] = img[...,i] * std[i] + mean[i]
+    return img
 
-	maxvals = maxvals.reshape((batch_size, num_joints, 1))
-	idx     = idx.reshape((batch_size, num_joints, 1))
+def get_random_crop_positions_with_pos2d(img, pos2d, crop_size):
+    max_pos = np.max(pos2d, axis=0)
+    min_pos = np.min(pos2d, axis=0)
 
-	preds   = np.tile(idx, (1,1,2)).astype(np.float32)
+    if max_pos[0] - min_pos[0] > crop_size[0] or max_pos[1] - min_pos[1] > crop_size[1]:
+        x_min = 0
+        y_min = 0
+        x_max = img.shape[1]
+        y_max = img.shape[0]
+    else:
+        x_min_min = np.maximum(int(max_pos[0] - crop_size[0] + 50), 0)
+        y_min_min = np.maximum(int(max_pos[1] - crop_size[1] + 50), 0)
+        x_min_max = np.minimum(int(min_pos[0]) - 50, img.shape[1] - crop_size[0])
+        y_min_max = np.minimum(int(min_pos[1]) - 50, img.shape[0] - crop_size[1])
+        #print(f'max_pos: {max_pos}, min_pos: {min_pos}, x_min: {(x_min_min, x_min_max)}, y_min: {(y_min_min, y_min_max)}', flush=True)
+        if y_min_min > y_min_max:
+            #print(f'Wofule. y_min: {(y_min_min, y_min_max)}, max_pos: {max_pos}, min_pos: {min_pos}', flush=True)
+            return 0, 0, img.shape[1], img.shape[0]
+        x_min = np.random.randint(x_min_min, x_min_max) if x_min_min < x_min_max else x_min_min
+        y_min = np.random.randint(y_min_min, y_min_max) if y_min_min < y_min_max else y_min_min
+        x_max = x_min + crop_size[0]
+        y_max = y_min + crop_size[1]
 
-	preds[:,:,0] = (preds[:,:,0]) % width
-	preds[:,:,1] = np.floor((preds[:,:,1]) / width)
+    return x_min, y_min, x_max, y_max
 
-	pred_mask    = np.tile(np.greater(maxvals, 0.0), (1,1,2))
-	pred_mask    = pred_mask.astype(np.float32)
+def normalize_screen_coordinates(X, w, h):
+    assert X.shape[-1] == 2
 
-	preds *= pred_mask
+    # Normalize so that [0, w] is mapped to [-1, 1], while preserving the aspect ratio
+    return X / w * 2 - [1, h / w]
 
-	return preds, maxvals
+def image_coordinates(X, w, h):
+    assert X.shape[-1] == 2
 
-def dist_acc(dists, thresholds = 0.5):
-	dist_cal     = np.not_equal(dists, -1)
-	num_dist_cal = dist_cal.sum()
+    # Reverse camera frame normalization
+    return (X + [1, h / w]) * w / 2
 
-	if num_dist_cal > 0:
-		return np.less(dists[dist_cal], thresholds).sum() * 1.0 / num_dist_cal
-	else:
-		return -1
+def h36m_pos2d_preprocess(input_dir, output_dir=None):
+    if output_dir is None:
+        output_dir = input_dir
 
-def calc_dists(preds, target, normalize):
-	preds  =  preds.astype(np.float32)
-	target = target.astype(np.float32)
-	dists  = np.zeros((preds.shape[1], preds.shape[0]))
+    fns = glob(os.path.join(input_dir, 'S*/MyPoseFeatures/D2_Positions/*.cdf'))
+    for fn in tqdm(fns):
+        raw_data = cdflib.CDF(fn)
+        pts = raw_data['Pose'][:,0::5,:].reshape(-1,32,2)
+        #np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts[:,Human36MMetadata.used_joint_mask,:])
+        np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts)
 
-	for n in range(preds.shape[0]):
-		for c in range(preds.shape[1]):
-			if target[n, c, 0] > 1 and target[n, c, 1] > 1:
-				normed_preds   =  preds[n, c, :] / normalize[n]
-				normed_targets = target[n, c, :] / normalize[n]
-				dists[c, n]    = np.linalg.norm(normed_preds - normed_targets)
-			else:
-				dists[c, n]    = -1
+def h36m_pos3d_preprocess(input_dir, output_dir=None):
+    if output_dir is None:
+        output_dir = input_dir
 
-	return dists
-
-def accuracy(output, target, thr_PCK, thr_PCKh, threshold=0.5):
-	num_joint = output.shape[1]
-	norm = 1.0
-
-	pred, _   = get_max_preds(output)
-	target, _ = get_max_preds(target)
-
-	h         = output.shape[2]
-	w         = output.shape[3]
-	norm      = np.ones((pred.shape[0], 2)) * np.array([h,w]) / 10
-
-	dists = calc_dists(pred, target, norm)
-
-	acc     = np.zeros(num_joint)
-	avg_acc = 0
-	cnt     = 0
-	visible = np.zeros(num_joint)
-
-	for i in range(num_joint):
-		acc[i] = dist_acc(dists[i])
-		if acc[i] >= 0:
-			avg_acc = avg_acc + acc[i]
-			cnt    += 1
-			visible[i] = 1
-		else:
-			acc[i] = 0
-
-	avg_acc = avg_acc / cnt if cnt != 0 else 0
-
-	if cnt != 0:
-		acc[0] = avg_acc
-
-	# PCKh
-	PCKh = np.zeros(num_joint)
-	avg_PCKh = 0
-
-	headLength = np.linalg.norm(target[:,9,:] - target[:,10,:])
-
-	for i in range(num_joint):
-		PCKh[i] = dist_acc(dists[i], thr_PCKh*headLength)
-		if PCKh[i] >= 0:
-			avg_PCKh = avg_PCKh + PCKh[i]
-		else:
-			PCKh[i] = 0
-
-	avg_PCKh = avg_PCKh / cnt if cnt != 0 else 0
-
-	if cnt != 0:
-		PCKh[0] = avg_PCKh
-
-
-	# PCK
-	PCK = np.zeros(num_joint)
-	avg_PCK = 0
-
-	torso = np.linalg.norm(target[:,0,:] - target[:,9,:])
-
-	for i in range(num_joint):
-		PCK[i] = dist_acc(dists[i], thr_PCK*torso)
-
-		if PCK[i] >= 0:
-			avg_PCK = avg_PCK + PCK[i]
-		else:
-			PCK[i] = 0
-
-	avg_PCK = avg_PCK / cnt if cnt != 0 else 0
-
-	if cnt != 0:
-		PCK[0] = avg_PCK
-
-	return acc, PCK, PCKh, cnt, pred, visible
-
-if __name__ == '__main__':
-    import cv2
-    from glob import glob
-
-    root_path = '/scratch/PI/cqf/datasets/h36m'
-    img_path = root_path + '/img'
-    pos2d_path = root_path + '/pos2d'
-
-    img_fns = glob(img_path+'/*.jpg')
-    '''
-    cm = AverageMeter()
-    for img_fn in img_fns:
-        img = cv2.imread(img_fn)
-        mean = np.mean(img, axis=(0,1))
-        cm.update(mean)
-        if cm.count % 10000 == 0:
-            print(f'Iter {cm.count}: {cm.avg}')
-    print(cm.avg)
-    '''
-    #from tqdm import tqdm
-    '''
-    import time
-    mean = np.array([66.49247512, 70.43421173, 112.82712325])
-    std = AverageMeter()
-    start_time = time.time()
-    for img_fn in img_fns:
-        img = cv2.imread(img_fn)
-        img = np.mean(np.square(img.reshape(-1, 3) - mean), axis=0)
-        std.update(img)
-        if std.count % 10000 == 0:
-            print(f'Iter {std.count}: {std.avg}')
-    print(np.sqrt(std.avg))
-    print((time.time() - start_time)/ 3600.0)
-    '''
-	
-    import numpy as np
-    hmaps = np.random.randn(2, 17, 32, 32)
-    output = np.random.randn(2, 17, 32, 32)
-    acc, PCK, PCKh, cnt, pred, visible = accuracy(output, hmaps, 0.2, 0.5)
-    print(acc)
-    print(PCK)
+    fns = glob(os.path.join(input_dir, 'S*/MyPoseFeatures/D3_Positions/*.cdf'))
+    for fn in tqdm(fns):
+        raw_data = cdflib.CDF(fn)
+        pts = raw_data['Pose'][:,0::5,:].reshape(-1,32,3)
+        #np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts[:,Human36MMetadata.used_joint_mask,:])
+        np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts)

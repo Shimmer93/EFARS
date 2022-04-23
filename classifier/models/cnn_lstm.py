@@ -7,6 +7,9 @@ from torch.nn.utils.rnn import pack_padded_sequence
 import torch.nn.functional as F
 from torchvision.models import resnet18, resnet101
 
+# In: B x 3 x T x H x W
+# Out: B x C
+# B: Batch size, T: Length of Time Sequence, C: Number of classes
 class CNNLSTM(nn.Module):
     def __init__(self, num_classes=2):
         super(CNNLSTM, self).__init__()
@@ -17,10 +20,11 @@ class CNNLSTM(nn.Module):
         self.fc2 = nn.Linear(128, num_classes)
        
     def forward(self, x_3d):
+        x_3d_new = x_3d.permute((0, 1, 4, 2, 3))
         hidden = None
         for t in range(x_3d.size(1)):
             with torch.no_grad():
-                x = self.resnet(x_3d[:, t, :, :, :])  
+                x = self.resnet(x_3d_new[:, t, :, :, :])  
             out, hidden = self.lstm(x.unsqueeze(0), hidden)         
 
         x = self.fc1(out[-1, :, :])
@@ -28,9 +32,6 @@ class CNNLSTM(nn.Module):
         x = self.fc2(x)
         return x
 
-# In: B x T x 3 x H x W
-# Out: B x C
-# B: Batch size, T: Length of Time Sequence, C: Number of classes
 if __name__ == '__main__':
     m = CNNLSTM(num_classes=14)
     x = torch.randn(2,5,3,128,128)

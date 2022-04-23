@@ -406,7 +406,3 @@ if __name__ == '__main__':
     x = torch.randn(2,3,256,256)
     y = m(x)
     print(y.shape)
-    ysum = y.sum(axis=1).unsqueeze(1)
-    print(ysum.shape)
-    yy = torch.cat((y,ysum),dim=1)
-    print(yy.shape)

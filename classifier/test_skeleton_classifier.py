@@ -27,8 +27,6 @@ from models.mlp import MLP, MLPTransformerModel
 
 from data.human36m import Human36M2DTemporalDataset, Human36MMetadata
 from utils.misc import AverageMeter, seed_everything
-from utils.transform import do_pos2d_train_transforms, do_pos2d_val_transforms
-from utils.graph import adj_mx_from_edges
 #from utils.parser import args
 
 seed_everything(2333)
