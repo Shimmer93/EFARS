@@ -1,23 +1,25 @@
 import sys
 sys.path.insert(1, '/home/samuel/EFARS/')
-import os
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from glob import glob
 import random
-from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
 from models.sem_gcn import SemGCN
-from estimator.models.mlp import MLP
+from models.mlp import MLP
+from models.video3d import VideoPose3DNonTemporal
+
 from data.human36m import Human36M2DTo3DDataset, Human36MMetadata
 from utils.misc import seed_everything
 from utils.graph import adj_mx_from_edges
 from utils.parser import args
 from utils.fitter import Pose2Dto3DFitter, get_config
-from utils.metrics import MPJPE_PMPJPE
+from utils.metrics import MPJPE_PMPJPE_NMPJPE
+from utils.data import TrainDataLoader, ValDataLoader, TestDataLoader
+if args.gpus != None:
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpus
 
 seed_everything(args.seed)
 
@@ -26,12 +28,11 @@ img_path = root_path + '/imgs'
 pos2d_path = root_path + '/pos2d'
 pos3d_path = root_path + '/pos3d'
 
-img_fns = glob(img_path+'/S[0-9]_*.jpg')
-split = int(0.8*len(img_fns))
+img_fns = glob(img_path+'/S[0-9]_*.jpg') # Errors in S11
 random.shuffle(img_fns)
-train_fns = img_fns[:50000]
-val_fns = img_fns[50000:60000]
-test_fns = img_fns[60000:70000]
+train_fns = img_fns[:500]
+val_fns = img_fns[500:600]
+test_fns = img_fns[600:700]
 
 train_dataset = Human36M2DTo3DDataset(train_fns, pos2d_path, pos3d_path)
 val_dataset = Human36M2DTo3DDataset(val_fns, pos2d_path, pos3d_path)
@@ -42,31 +43,15 @@ if args.model == 'sem_gcn':
     net = SemGCN(adj=adj, num_layers=4, hid_dim=args.hid_dim)
 elif args.model == 'mlp':
     net = MLP(num_joint=Human36MMetadata.num_classes)
+elif args.model == 'videopose3d':
+    net = VideoPose3DNonTemporal(Human36MMetadata.num_joints, 2, Human36MMetadata.num_joints, [1,1,1,1,1])
 
 num_gpus = torch.cuda.device_count()
-train_loader = torch.utils.data.DataLoader(
-    train_dataset,
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=SequentialSampler(train_dataset),
-    drop_last=True,
-)
-val_loader = torch.utils.data.DataLoader(
-    val_dataset, 
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=SequentialSampler(val_dataset),
-    shuffle=False,
-)
-test_loader = torch.utils.data.DataLoader(
-    test_dataset, 
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=SequentialSampler(test_dataset),
-    shuffle=False,
-)
+train_loader = TrainDataLoader(train_dataset, args.batch_size, num_gpus, args.num_workers)
+val_loader = ValDataLoader(val_dataset, args.batch_size, num_gpus, args.num_workers)
+test_loader = TestDataLoader(test_dataset, args.batch_size, num_gpus, args.num_workers)
 
-cfg = get_config(args, nn.MSELoss(), MPJPE_PMPJPE(), train_loader)
+cfg = get_config(args, nn.MSELoss(), MPJPE_PMPJPE_NMPJPE(), train_loader)
 fitter = Pose2Dto3DFitter(net, cfg)
 
 if args.test:

@@ -82,7 +82,7 @@ class TemporalModelBase(nn.Module):
 # if filter_widths == [3, 3, 3, 3, 3]:
 #   Out: B x (T - 242) x 17 x 3 (T > 243)
 # B: Batch size, T: Length of Time Sequence
-class TemporalModel(TemporalModelBase):
+class VideoPose3DStandard(TemporalModelBase):
     """
     Reference 3D pose estimation model with temporal convolutions.
     This implementation can be used for all use-cases.
@@ -143,11 +143,11 @@ class TemporalModel(TemporalModelBase):
         x = self.shrink(x)
         return x
 
-# In: B x T x 17 x 2
-# Out: B x T x 17 x 3
+# In: B x 17 x 2
+# Out: B x 17 x 3
 # filter_widths: [1, 1, 1, 1, 1]:
-# B: Batch size, T: Length of Time Sequence
-class TemporalModelOptimized1f(TemporalModelBase):
+# B: Batch size
+class VideoPose3DNonTemporal(TemporalModelBase):
     """
     3D pose estimation model optimized for single-frame batching, i.e.
     where batches have input length = receptive field, and output length = 1.
@@ -206,9 +206,19 @@ class TemporalModelOptimized1f(TemporalModelBase):
         x = self.shrink(x)
         return x
 
-if __name__ == '__main__':
-    import torch
-    m = TemporalModelOptimized1f(17, 2, 17, [1, 1, 1, 1, 1])
-    x = torch.randn(2, 32, 17, 2)
-    y = m(x)
-    print(y.shape)
+    def forward(self, x):
+        x_new = x.unsqueeze(1)
+        assert len(x_new.shape) == 4
+        assert x_new.shape[-2] == self.num_joints_in
+        assert x_new.shape[-1] == self.in_features
+        
+        sz = x_new.shape[:3]
+        x_new = x_new.view(x_new.shape[0], x_new.shape[1], -1)
+        x_new = x_new.permute(0, 2, 1)
+        
+        x_new = self._forward_blocks(x_new)
+        
+        x_new = x_new.permute(0, 2, 1)
+        x_new = x_new.view(sz[0], -1, self.num_joints_out, 3)
+        
+        return x_new.squeeze(1)

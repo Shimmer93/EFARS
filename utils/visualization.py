@@ -6,7 +6,11 @@ import matplotlib.pyplot as plt
 from utils.conversion import project_pos3d_to_pos2d, hmap_to_pos2d
 
 def prepare_img(img, denormalize=None):
-    img_array = img.detach().numpy().copy()
+    '''
+        Convert a img tensor to a numpy array
+        denormalize: A denormalization function in case the img is normalized
+    '''
+    img_array = img.cpu().detach().numpy()
     img_array = img_array.transpose(1, 2, 0)
     img_array = denormalize(img_array) if denormalize != None else img_array
     img_array = (img_array * 255).astype(np.uint8)

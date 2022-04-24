@@ -1,9 +1,9 @@
-from calendar import c
 import sys
 sys.path.insert(1, '/home/samuel/EFARS/')
 
 import torch
 import torch.nn as nn
+import numpy as np
 import os
 from glob import glob
 from datetime import datetime
@@ -23,6 +23,7 @@ class Fitter:
             os.makedirs(self.base_dir)
         
         self.log_path = f'{self.base_dir}/log.txt'
+        np.set_printoptions(precision=5) # Metrics printing
         self.best_loss = 10**5
 
         self.model = model
@@ -30,7 +31,7 @@ class Fitter:
             self.model = self.model.cuda()
 
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.lr)
-        self.scaler = torch.cuda.amp.GradScaler()
+        self.scaler = torch.cuda.amp.GradScaler() # For float16
         
         self.scheduler = config.scheduler(self.optimizer, **config.scheduler_params)
         self.criterion = config.criterion
@@ -41,12 +42,15 @@ class Fitter:
         self.log(f'Fitter prepared. Model: {self.model.__class__.__name__}, ' + \
                  f'Criterion: {self.criterion.__class__.__name__}, ' + \
                  f'Metrics: {self.metrics.__class__.__name__}, ' + \
+                 f'Optimizer: {self.optimizer.__class__.__name__}, ' + \
+                 f'Scheduler: {self.scheduler.__class__.__name__}, ' + \
                  f'Learning Rate: {self.config.lr}, ' + \
                  f'Batch Size: {self.config.batch_size}, ' + \
                  f'Epochs: {self.config.n_epochs}')
 
+        # Use DataParallel even if there is only one GPU
         if self.config.cuda:
-            print(f"DataParallel is used. Number of GPUs: {torch.cuda.device_count()}")
+            print(f"DataParallel is used. Number of GPU(s): {torch.cuda.device_count()}")
             self.model = nn.DataParallel(self.model)
             self.batch_size //= torch.cuda.device_count()
 
@@ -69,6 +73,7 @@ class Fitter:
             self.log(f'[RESULT]: Val. Epoch: {self.epoch}, Loss: {loss.avg:.8f}, ' + \
                      f'Metrics: {metrics.avg}, Time: {(time.time() - t):.5f}')
 
+            # Keep top-3 checkpoints
             if loss.avg < self.best_loss:
                 self.best_loss = loss.avg
                 self.model.eval()
@@ -76,6 +81,7 @@ class Fitter:
                 for path in sorted(glob(f'{self.base_dir}/best-checkpoint-*epoch.bin'))[:-3]:
                     os.remove(path)
 
+            # For schedulers such as ReduceLROnPlateau
             if self.config.validation_scheduler:
                 self.scheduler.step(metrics=loss.avg)
 
@@ -85,6 +91,7 @@ class Fitter:
         self.model.train()
         summary_loss = AverageMeter()
         summary_metrics = AverageMeter()
+
         t = time.time()
         for step, data in enumerate(train_loader):
             if self.config.verbose:
@@ -93,12 +100,14 @@ class Fitter:
                           f'Metrics: {summary_metrics.avg}, Time: {(time.time() - t):.5f}', end='\r')
 
             loss, metrics = self.compute_loss_and_metrics(data, train=True)
+
             summary_loss.update(loss.detach().item(), self.batch_size)
             summary_metrics.update(metrics.cpu().detach().numpy(), self.batch_size)
 
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer) # native fp16
             
+            # For schedulers such as OneCycleLR
             if self.config.step_scheduler:
                 self.scheduler.step()
             
@@ -110,6 +119,7 @@ class Fitter:
         self.model.eval()
         summary_loss = AverageMeter()
         summary_metrics = AverageMeter()
+
         t = time.time()
         for step, data in enumerate(val_loader):
             if self.config.verbose:
@@ -132,6 +142,7 @@ class Fitter:
         print(f'Params count: {count_parameters_in_MB(self.model)}')
         summary_loss = AverageMeter()
         summary_metrics = AverageMeter()
+
         t = time.time()
         for step, data in enumerate(test_loader):
             if self.config.verbose:
@@ -149,6 +160,9 @@ class Fitter:
               f'Metrics: {summary_metrics.avg}, Time: {(time.time() - t):.5f}')
 
     def compute_loss_and_metrics(self, data, train):
+        '''
+            Abstract method
+        '''
         return 0, 0
 
     def save(self, path):
@@ -164,9 +178,11 @@ class Fitter:
     def load(self, path, only_model=False):
         checkpoint = torch.load(path)
         state_dict = checkpoint['model_state_dict']
-        first_name = state_dict.keys()[0]
+        first_name = list(state_dict.keys())[0]
         model_parallel = self.model.__class__.__name__ == 'DataParallel'
         load_parallel = 'module' in first_name
+
+        # Deal with DataParallel
         if model_parallel == load_parallel:
             self.model.load_state_dict(state_dict)
         elif model_parallel and not load_parallel:
@@ -213,7 +229,7 @@ class PoseEstimation2DFitter(Fitter):
             hmaps = hmaps.cuda()
         with torch.cuda.amp.autocast():
             preds = self.model(imgs)
-            if preds.shape[1] != hmaps.shape[1] and train:
+            if preds.shape[1] != hmaps.shape[1] and train: # For UniPose
                 hmaps_sum = hmaps.sum(dim=1).unsqueeze(1)
                 hmaps_minus = torch.clamp(1 - hmaps_sum, 0, 1)
                 hmaps = torch.cat((hmaps, hmaps_minus), dim=1)
@@ -230,6 +246,26 @@ class Pose2Dto3DFitter(Fitter):
         pos2ds = pos2ds.float()
         pos3ds = pos3ds.float()
         return self._compute_loss_and_metrics(pos2ds, pos3ds)
+
+class Pose2Dto3DTemporalFitter(Fitter):
+    def __init__(self, model, config):
+        super().__init__(model, config)
+    
+    def compute_loss_and_metrics(self, data, train):
+        pos2ds, pos3ds, _, _, _ = data
+        pos2ds = pos2ds.float()
+        pos3ds = pos3ds.float()
+        if self.config.cuda:
+            pos2ds = pos2ds.cuda()
+            pos3ds = pos3ds.cuda()
+        with torch.cuda.amp.autocast():
+            preds = self.model(pos2ds)
+            if preds.shape[1] != pos3ds.shape[1]: # For Video3DPose
+                assert pos3ds.shape[1] - preds.shape[1] == 26
+                pos3ds = pos3ds[:,13:13+preds.shape[1],...]
+            loss = self.criterion(preds, pos3ds)
+            metrics = self.metrics(preds, pos3ds)
+        return loss, metrics
 
 class PoseVideoClassificationFitter(Fitter):
     def __init__(self, model, config):
@@ -265,12 +301,12 @@ class FitterDefaultConfig:
     verbose_step = 1
 
     criterion = nn.MSELoss()
-    metrics = None
+    metrics = None # Callable class returning a tensor
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau
     scheduler_params = dict(patience=5, factor=0.1)
-    step_scheduler = False  # do scheduler.step after optimizer.step
-    validation_scheduler = True  # do scheduler.step after validation stage loss
+    step_scheduler = False # Change with type of scheduler
+    validation_scheduler = True # Change with type of scheduler
 
 def get_config(args, criterion, metrics, data_loader):
     cfg = FitterDefaultConfig

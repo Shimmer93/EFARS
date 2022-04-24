@@ -1,14 +1,11 @@
 import sys
 sys.path.insert(1, '/home/samuel/EFARS/')
-import os
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 import torch
 import torch.nn as nn
 import numpy as np
 from glob import glob
 import random
-from torch.utils.data.sampler import SequentialSampler, RandomSampler
 import albumentations as A
 
 from models.openpose import OpenPose
@@ -17,7 +14,11 @@ from data.human36m import Human36M2DPoseDataset, Human36MMetadata
 from utils.misc import seed_everything, normalize, get_random_crop_positions_with_pos2d
 from utils.parser import args
 from utils.fitter import PoseEstimation2DFitter, get_config
-from utils.metrics import MPCK_MPCKh
+from utils.metrics import MAP_MPCK_MPCKh
+from utils.data import TrainDataLoader, ValDataLoader, TestDataLoader
+if args.gpus != None:
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpus
 
 seed_everything(args.seed)
 
@@ -26,7 +27,6 @@ img_path = root_path + '/imgs'
 pos2d_path = root_path + '/pos2d'
 
 img_fns = glob(img_path+'/*.jpg')
-split = int(0.8*len(img_fns))
 random.shuffle(img_fns)
 train_fns = img_fns[:10000]
 val_fns = img_fns[10000:12000]
@@ -73,29 +73,11 @@ elif args.model == 'openpose':
     net = OpenPose()
 
 num_gpus = torch.cuda.device_count()
-train_loader = torch.utils.data.DataLoader(
-    train_dataset,
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=SequentialSampler(train_dataset),
-    drop_last=True,
-)
-val_loader = torch.utils.data.DataLoader(
-    val_dataset, 
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=SequentialSampler(val_dataset),
-    shuffle=False,
-)
-test_loader = torch.utils.data.DataLoader(
-    test_dataset, 
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=SequentialSampler(test_dataset),
-    shuffle=False,
-)
+train_loader = TrainDataLoader(train_dataset, args.batch_size, num_gpus, args.num_workers)
+val_loader = ValDataLoader(val_dataset, args.batch_size, num_gpus, args.num_workers)
+test_loader = TestDataLoader(test_dataset, args.batch_size, num_gpus, args.num_worker)
 
-cfg = get_config(args, nn.MSELoss(), MPCK_MPCKh(), train_loader)
+cfg = get_config(args, nn.MSELoss(), MAP_MPCK_MPCKh(), train_loader)
 fitter = PoseEstimation2DFitter(net, cfg)
 
 if args.test:

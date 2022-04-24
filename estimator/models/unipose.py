@@ -375,17 +375,14 @@ class UniPose(nn.Module):
 
     def freeze_bn(self):
         for m in self.modules():
-            if isinstance(m, SynchronizedBatchNorm2d):
-                m.eval()
-            elif isinstance(m, nn.BatchNorm2d):
+            if isinstance(m, nn.BatchNorm2d):
                 m.eval()
 
     def get_1x_lr_params(self):
         modules = [self.backbone]
         for i in range(len(modules)):
             for m in modules[i].named_modules():
-                if isinstance(m[1], nn.Conv2d) or isinstance(m[1], SynchronizedBatchNorm2d) \
-                        or isinstance(m[1], nn.BatchNorm2d):
+                if isinstance(m[1], nn.Conv2d) or isinstance(m[1], nn.BatchNorm2d):
                     for p in m[1].parameters():
                         if p.requires_grad:
                             yield p
@@ -394,15 +391,7 @@ class UniPose(nn.Module):
         modules = [self.aspp, self.decoder]
         for i in range(len(modules)):
             for m in modules[i].named_modules():
-                if isinstance(m[1], nn.Conv2d) or isinstance(m[1], SynchronizedBatchNorm2d) \
-                        or isinstance(m[1], nn.BatchNorm2d):
+                if isinstance(m[1], nn.Conv2d) or isinstance(m[1], nn.BatchNorm2d):
                     for p in m[1].parameters():
                         if p.requires_grad:
                             yield p
-
-if __name__ == '__main__':
-    m = UniPose(dataset='human3.6m',num_classes=17)
-    #m.eval()
-    x = torch.randn(2,3,256,256)
-    y = m(x)
-    print(y.shape)

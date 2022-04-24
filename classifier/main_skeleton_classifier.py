@@ -1,11 +1,8 @@
 import sys
 sys.path.insert(1, '/home/samuel/EFARS/')
-import os
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 import torch
 import torch.nn as nn
-from torch.utils.data.sampler import SequentialSampler, RandomSampler
 from torch.utils.data import ConcatDataset
 
 from models.st_gcn import ST_GCN_18
@@ -17,6 +14,10 @@ from utils.misc import seed_everything
 from utils.parser import args
 from utils.fitter import PoseSkeletonClassificationFitter, get_config
 from utils.metrics import Accuracy
+from utils.data import TrainDataLoader, ValDataLoader, TestDataLoader
+if args.gpus != None:
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpus
 
 seed_everything(args.seed)
 
@@ -61,27 +62,9 @@ elif args.model == 'mlp_trans_enc':
     net = MLPTransformerModel(128, MMFitMetaData.num_joints, MMFitMetaData.num_classes)
 
 num_gpus = torch.cuda.device_count()
-train_loader = torch.utils.data.DataLoader(
-    train_dataset,
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=RandomSampler(train_dataset),
-    drop_last=True,
-)
-val_loader = torch.utils.data.DataLoader(
-    val_dataset, 
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=SequentialSampler(val_dataset),
-    shuffle=False,
-)
-test_loader = torch.utils.data.DataLoader(
-    test_dataset, 
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=SequentialSampler(test_dataset),
-    shuffle=False,
-)
+train_loader = TrainDataLoader(train_dataset, args.batch_size, num_gpus, args.num_workers)
+val_loader = ValDataLoader(val_dataset, args.batch_size, num_gpus, args.num_workers)
+test_loader = TestDataLoader(test_dataset, args.batch_size, num_gpus, args.num_worker)
 
 cfg = get_config(args, nn.CrossEntropyLoss(), Accuracy(), train_loader)
 fitter = PoseSkeletonClassificationFitter(net, cfg)

@@ -22,6 +22,13 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
 
 
 def adj_mx_from_edges(num_pts, edges, sparse=True):
+    '''
+        Args:
+            num_pts: Number of vertices
+            edges: E x 2, where E is the number of edges
+        Return:
+            E x E matrix
+    '''
     edges = np.array(edges, dtype=np.int32)
     data, i, j = np.ones(edges.shape[0]), edges[:, 0], edges[:, 1]
     adj_mx = sp.coo_matrix((data, (i, j)), shape=(num_pts, num_pts), dtype=np.float32)

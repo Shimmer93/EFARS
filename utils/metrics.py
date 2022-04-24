@@ -194,16 +194,18 @@ def n_mpjpe(predicted, target):
         predicted_new = predicted
         target_new = target
 
-    norm_predicted = torch.mean(torch.sum(predicted_new ** 2, dim=3, keepdim=True), dim=2, keepdim=True)
-    norm_target = torch.mean(torch.sum(target_new * predicted_new, dim=3, keepdim=True), dim=2, keepdim=True)
+    norm_predicted = torch.mean(torch.sum(predicted_new ** 2, dim=2, keepdim=True))
+    norm_target = torch.mean(torch.sum(target_new * predicted_new, dim=2, keepdim=True))
     scale = norm_target / norm_predicted
     return mpjpe(scale * predicted_new, target_new)
 
 
+# Classification accuracy
 class Accuracy:
     def __call__(self, preds, labels):
         return (preds.argmax(dim=-1) == labels).float().mean()
 
+# Metrics for 2D pose estimation
 class MAP_MPCK_MPCKh:
     def __init__(self, thr_pck=0.2, thr_pckh=0.5):
         self.thr_pck = thr_pck
@@ -214,6 +216,7 @@ class MAP_MPCK_MPCKh:
         ACC, PCK, PCKh, _, _, _ = accuracy_2d_pose(preds_array, targets_array, 0.2, 0.5)
         return torch.tensor([ACC.mean(), PCK.mean(), PCKh.mean()])
 
+# Metrics for 3D pose estimation
 class MPJPE_PMPJPE_NMPJPE:
     def __call__(self, preds, targets):
         mPJPE = mpjpe(preds.detach(), targets.detach())

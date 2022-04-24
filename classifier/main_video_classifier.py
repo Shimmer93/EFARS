@@ -1,12 +1,9 @@
 import sys
 sys.path.insert(1, '/home/samuel/EFARS/')
-import os
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 import torch
 import torch.nn as nn
 
-from torch.utils.data.sampler import SequentialSampler, RandomSampler
 from torch.utils.data import random_split, ConcatDataset
 from torchvision.datasets import HMDB51
 import torchvision.transforms as T
@@ -20,6 +17,10 @@ from utils.misc import seed_everything
 from utils.parser import args
 from utils.fitter import PoseVideoClassificationFitter, get_config
 from utils.metrics import Accuracy
+from utils.data import TrainDataLoader, ValDataLoader, TestDataLoader
+if args.gpus != None:
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpus
 
 seed_everything(args.seed)
 
@@ -60,35 +61,18 @@ elif args.model == 'timesformer':
     net = TimeSformer(img_size=args.crop_size, num_classes=HMDB51Metadata.num_classes, num_frames=args.seq_len)
 
 num_gpus = torch.cuda.device_count()
-train_loader = torch.utils.data.DataLoader(
-    train_dataset,
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=SequentialSampler(train_dataset),
-    drop_last=True,
-)
-val_loader = torch.utils.data.DataLoader(
-    val_dataset, 
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=SequentialSampler(val_dataset),
-    shuffle=False,
-)
-test_loader = torch.utils.data.DataLoader(
-    test_dataset, 
-    batch_size=args.batch_size if num_gpus == 0 else args.batch_size * num_gpus,
-    num_workers=args.num_workers,
-    sampler=SequentialSampler(test_dataset),
-    shuffle=False,
-)
+train_loader = TrainDataLoader(train_dataset, args.batch_size, num_gpus, args.num_workers)
+val_loader = ValDataLoader(val_dataset, args.batch_size, num_gpus, args.num_workers)
+test_loader = TestDataLoader(test_dataset, args.batch_size, num_gpus, args.num_worker)
 
 cfg = get_config(args, nn.CrossEntropyLoss(), Accuracy(), train_loader)
 fitter = PoseVideoClassificationFitter(net, cfg)
 
 if args.test:
     fitter.test(test_loader, args.checkpoint)
-elif args.checkpoint != None:
-    fitter.load(args.checkpoint)
-    fitter.fit(train_loader, val_loader)
 else:
+    if args.checkpoint != None:
+        fitter.load(args.checkpoint)
     fitter.fit(train_loader, val_loader)
+    if args.test_after_train:
+        fitter.test(test_loader, f'{fitter.base_dir}/last-checkpoint.bin')
