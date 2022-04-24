@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+# Credit: https://github.com/facebookresearch/TimeSformer/tree/main/timesformer/models
 
 from .build import MODEL_REGISTRY, build_model  # noqa
 from .custom_video_model_builder import *  # noqa

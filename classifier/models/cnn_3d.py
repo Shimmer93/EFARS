@@ -1,3 +1,5 @@
+# Credit: https://github.com/okankop/Efficient-3DCNNs/tree/master/models
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

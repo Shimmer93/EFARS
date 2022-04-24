@@ -1,5 +1,6 @@
 import sys
-sys.path.insert(1, '/home/samuel/EFARS/')
+import os
+sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
 
 import torch
 import torch.nn as nn

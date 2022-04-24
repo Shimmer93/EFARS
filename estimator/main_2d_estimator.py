@@ -1,5 +1,6 @@
 import sys
-sys.path.insert(1, '/home/samuel/EFARS/')
+import os
+sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
 
 import torch
 import torch.nn as nn
@@ -17,7 +18,6 @@ from utils.fitter import PoseEstimation2DFitter, get_config
 from utils.metrics import MAP_MPCK_MPCKh
 from utils.data import TrainDataLoader, ValDataLoader, TestDataLoader
 if args.gpus != None:
-    import os
     os.environ["CUDA_VISIBLE_DEVICES"]=args.gpus
 
 seed_everything(args.seed)

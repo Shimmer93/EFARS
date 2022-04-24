@@ -1,3 +1,5 @@
+# Credit: https://github.com/garyzhao/SemGCN/blob/master/common/graph_utils.py
+
 import torch
 import numpy as np
 import scipy.sparse as sp

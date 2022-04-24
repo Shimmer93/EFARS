@@ -1,5 +1,7 @@
 import sys
-sys.path.insert(1, '/home/samuel/EFARS')
+import os
+sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
+
 import cv2 as cv
 import numpy as np
 import matplotlib.pyplot as plt

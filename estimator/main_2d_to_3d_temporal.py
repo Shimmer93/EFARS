@@ -1,6 +1,6 @@
 import sys
-sys.path.insert(1, '/home/samuel/EFARS/')
-
+import os
+sys.path.insert(1, os.path.dirname(os.path.dirname(__file__)))
 
 import torch
 import torch.nn as nn
@@ -18,7 +18,6 @@ from utils.fitter import Pose2Dto3DTemporalFitter, get_config
 from utils.metrics import MPJPE_PMPJPE_NMPJPE
 from utils.data import TrainDataLoader, ValDataLoader, TestDataLoader
 if args.gpus != None:
-    import os
     os.environ["CUDA_VISIBLE_DEVICES"]=args.gpus
 
 seed_everything(args.seed)
@@ -30,9 +29,9 @@ pos3d_path = root_path + '/pos3d'
 
 img_fns = glob(img_path+'/S[0-9]_*.jpg') # Errors in S11
 random.shuffle(img_fns)
-train_fns = img_fns[:500]
-val_fns = img_fns[500:600]
-test_fns = img_fns[600:700]
+train_fns = img_fns[:50000]
+val_fns = img_fns[50000:60000]
+test_fns = img_fns[60000:70000]
 
 train_dataset = Human36M2DTo3DTemporalDataset(train_fns, pos2d_path, pos3d_path, length=args.seq_len)
 val_dataset = Human36M2DTo3DTemporalDataset(val_fns, pos2d_path, pos3d_path, length=args.seq_len)

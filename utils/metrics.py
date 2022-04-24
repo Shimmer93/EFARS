@@ -1,3 +1,6 @@
+# Credit: https://github.com/bmartacho/UniPose/blob/master/utils/evaluate.py
+# 		  https://github.com/garyzhao/SemGCN/blob/master/common/loss.py
+
 import torch
 import numpy as np
 
