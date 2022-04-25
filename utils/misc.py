@@ -2,10 +2,6 @@ import random
 import os
 import numpy as np
 import torch
-from glob import glob
-from tqdm import tqdm
-import cdflib
-from torch.utils.data.sampler import SequentialSampler, RandomSampler
 
 def count_parameters_in_MB(model):
     return np.sum(np.prod(v.size()) for name, v in model.named_parameters() if "auxiliary" not in name) / 1e6
@@ -46,28 +42,6 @@ def denormalize(img, mean, std):
         img[...,i] = img[...,i] * std[i] + mean[i]
     return img
 
-def TrainDataloader(train_dataset, batch_size, num_gpus, num_workers):
-    return torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size = batch_size if num_gpus == 0 else batch_size * num_gpus,
-        num_workers = num_workers,
-        sampler = RandomSampler(train_dataset),
-        drop_last = True,
-    )
-
-def ValDataloader(val_dataset, batch_size, num_gpus, num_workers):
-    return torch.utils.data.DataLoader(
-        val_dataset, 
-        batch_size = batch_size if num_gpus == 0 else batch_size * num_gpus,
-        num_workers = num_workers,
-        sampler = SequentialSampler(val_dataset),
-        shuffle = False,
-    )
-
-def TestDataloader(test_dataset, batch_size, num_gpus, num_workers):
-    return ValDataloader(test_dataset, batch_size, num_gpus, num_workers)
-
-
 def get_random_crop_positions_with_pos2d(img, pos2d, crop_size):
     '''
         (Debugging) Get a random cropping position such that the cropped image still contain the entire skeleton
@@ -107,29 +81,3 @@ def image_coordinates(X, w, h):
 
     # Reverse camera frame normalization
     return (X + [1, h / w]) * w / 2
-
-def h36m_pos2d_preprocess(input_dir, output_dir=None):
-    '''
-        Convert pos2d data from .cdf to .npy and slice it to make it consistent with image data
-    '''
-    if output_dir is None:
-        output_dir = input_dir
-
-    fns = glob(os.path.join(input_dir, 'S*/MyPoseFeatures/D2_Positions/*.cdf'))
-    for fn in tqdm(fns):
-        raw_data = cdflib.CDF(fn)
-        pts = raw_data['Pose'][:,0::5,:].reshape(-1,32,2)
-        np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts)
-
-def h36m_pos3d_preprocess(input_dir, output_dir=None):
-    '''
-        Convert pos3d data from .cdf to .npy and slice it to make it consistent with image data
-    '''
-    if output_dir is None:
-        output_dir = input_dir
-
-    fns = glob(os.path.join(input_dir, 'S*/MyPoseFeatures/D3_Positions/*.cdf'))
-    for fn in tqdm(fns):
-        raw_data = cdflib.CDF(fn)
-        pts = raw_data['Pose'][:,0::5,:].reshape(-1,32,3)
-        np.save(os.path.join(output_dir, fn[len(input_dir):-4]), pts)

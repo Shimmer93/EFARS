@@ -1,6 +1,4 @@
 import cv2 as cv
-from scipy.ndimage.filters import gaussian_filter
-import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -85,14 +83,3 @@ def show_img_with_hmap(img, hmap, denormalize=None):
     axes[0].imshow(img_array)
     axes[1].imshow(hmap_array)
     plt.show()
-
-def pos2d_to_hmap(pos2d, img_size, downsample, sigma):
-    hmap = np.zeros((img_size[0], img_size[1], pos2d.shape[0]), dtype=float)
-    for i in range(0, pos2d.shape[0]):
-        hmap[int(pos2d[i,1]), int(pos2d[i,0]), i] = 1.0
-        hmap[:, :, i] = gaussian_filter(hmap[:, :, i], sigma=sigma)
-    hmap[hmap > 1] = 1
-    hmap[hmap < 0.001] = 0
-    hmap = cv.resize(hmap, (img_size[0]//downsample, img_size[1]//downsample), cv.INTER_LINEAR)
-    hmap = hmap.transpose(2, 0, 1)
-    return hmap
