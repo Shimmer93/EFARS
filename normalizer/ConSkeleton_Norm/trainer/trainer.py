@@ -14,10 +14,10 @@ class fk_trainer(base_trainer):
         self.config = config
         self.data_loader = data_loader
         self.test_data_loader = test_data_loader
-        self.log_step = int(np.sqrt(data_loader.batch_size))
+        self.log_step = 10#int(np.sqrt(data_loader.batch_size))
         self.train_parameters = [self._prepare_data(item) for item in self.data_loader.dataset.get_parameters()]
         self.test_parameters = [self._prepare_data(item) for item in self.test_data_loader.dataset.get_parameters()]
-        self.lambda_s, self.lambda_q, self.lambda_pee, self.lambda_root, self.lambda_f, self.lambda_fc = 0.1, 1, 1.2, 0.3, 0.5, 0.5
+        self.lambda_recon_cycle, self.lambda_rotation_cycle, self.lambda_pee = 0.06, 0.1, 1.2
         self.stpes = 0
 
     def _train_epoch(self, epoch):
@@ -28,48 +28,21 @@ class fk_trainer(base_trainer):
         self.model.train()
         for batch_idx, datas in enumerate(self.data_loader):
             datas = [self._prepare_data(item, _from='tensor') for item in datas]
-            if self.config.trainer.use_loss_D:
-                poses_2d, poses_3d, bones, contacts, alphas, proj_facters, rotations = datas
-            else:
-                poses_2d, poses_3d, bones, contacts, alphas, proj_facters = datas
-            fake_bones, fake_rotations, fake_rotations_full, fake_pose_3d, fake_c, fake_proj = self.model.forward_fk(poses_2d, self.train_parameters)
-            loss_bones = torch.mean(torch.norm(fake_bones - bones, dim=-1))
+            poses_2d, poses_3d, bones, contacts, alphas, proj_facters, cam_para = datas
+            fake_rotations, fake_rotations_cycle, src_pose_3d, src_pose_3d_cycle = self.model.forward_fk(poses_2d, bones, self.train_parameters, cam_para)
             position_weights = torch.ones((1, 17)).cuda()
             position_weights[:, [0, 3, 6, 8, 11, 14]] = self.lambda_pee
-            loss_positions = torch.mean(torch.norm((fake_pose_3d.view((-1, 17, 3)) - poses_3d.view((-1, 17, 3))), dim=-1)*position_weights) if self.config.trainer.use_loss_3d else 0
-            loss_root = torch.mean(torch.norm(fake_proj - proj_facters, dim=-1)) if self.config.arch.translation else 0
-            loss_f = torch.mean(torch.norm(fake_c - contacts, dim=-1)) if self.config.trainer.use_loss_foot else 0
-            loss_fc = (torch.mean(get_velocity(fake_pose_3d, 3)[contacts[:, 1:-1, 0] == 1] ** 2) + torch.mean(get_velocity(fake_pose_3d, 6)[contacts[:, 1:-1, 0] == 1] ** 2)) if self.config.trainer.use_loss_foot else 0
-            if self.config.trainer.use_loss_D:
-                G_real = self.model.D(fake_rotations)
-                loss_G_GAN = torch.mean(torch.norm((G_real - 1) ** 2, dim=-1))
-            else:
-                loss_G_GAN = 0
+            loss_recon = torch.mean(torch.norm((src_pose_3d.view((-1, 17, 3)) - poses_3d.view((-1, 17, 3))), dim=-1)*position_weights)
+            loss_recon_cycle = torch.mean(torch.norm((src_pose_3d_cycle.view((-1, 17, 3)) - poses_3d.view((-1, 17, 3))), dim=-1)*position_weights)
+            loss_rotation_cycle = torch.nn.MSELoss()(fake_rotations, fake_rotations_cycle)
+            loss_G = loss_recon + loss_recon_cycle * self.lambda_recon_cycle + loss_rotation_cycle * self.lambda_rotation_cycle
             
-            loss_bones = loss_bones#*self.lambda_s
-            loss_G = loss_positions + loss_root*self.lambda_root + loss_f*self.lambda_f + loss_fc*self.lambda_fc + loss_G_GAN*self.lambda_q
-            
-            self.model.optimizer_S.zero_grad()
-            loss_bones.backward()
-            self.model.optimizer_S.step()
             self.model.optimizer_Q.zero_grad()
             loss_G.backward()
             self.model.optimizer_Q.step()
 
-            if self.config.trainer.use_loss_D:
-                D_real = self.model.D(rotations)
-                D_fake = self.model.D(fake_rotations.detach())
-                loss_D = torch.mean(torch.norm((D_real - 1) ** 2)) + torch.mean(torch.sum((D_fake) ** 2, dim=-1))
-                loss_D = loss_D*self.lambda_q
-                self.model.optimizer_D.zero_grad()
-                loss_D.backward()
-                self.model.optimizer_D.step()
-            else:
-                loss_D = 0
 
-            train_log = {'loss_G': loss_G, 'loss_positions': loss_positions, 'loss_bones': loss_bones, \
-                                        'loss_root': loss_root, 'loss_f': loss_f, 'loss_fc': loss_fc, \
-                                        'loss_G_GAN': loss_G_GAN, 'loss_D': loss_D}
+            train_log = {'loss_G': loss_G, 'loss_recon': loss_recon, 'loss_recon_cycle':loss_recon_cycle, 'loss_rotation_cycle':loss_rotation_cycle}
 
             if self.verbosity >= 2 and batch_idx % self.log_step == 0:
                 self.writer.set_step(self.stpes, mode='train')

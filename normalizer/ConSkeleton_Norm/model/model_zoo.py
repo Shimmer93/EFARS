@@ -331,6 +331,34 @@ class pooling_net(base_model):
         return torch.transpose(x, 1, 2)
 
 
+class EQ_net(base_model):
+    def __init__(self, in_features, out_features):
+        super(EQ_net, self).__init__()
+        layers = nn.Sequential(
+            nn.Conv1d(in_features, 1024, 1, 1, bias=True),
+            nn.BatchNorm1d(1024, momentum=0.1),
+            nn.Conv1d(1024, 1024, 5, 1, padding=2, bias=True),
+            nn.BatchNorm1d(1024, momentum=0.1),
+            nn.Conv1d(1024, 1024, 3, 1, padding=1, bias=True),
+            nn.BatchNorm1d(1024, momentum=0.1),
+            nn.Conv1d(1024, 1024, 1, 1, padding=0, bias=True),
+            nn.BatchNorm1d(1024, momentum=0.1),
+            nn.Conv1d(1024, 1024, 5, 1, padding=2, bias=True),
+            nn.BatchNorm1d(1024, momentum=0.1),
+            nn.Conv1d(1024, 1024, 3, 1, padding=1, bias=True),
+            nn.BatchNorm1d(1024, momentum=0.1),
+            nn.Conv1d(1024, 1024, 1, 1, padding=0, bias=True),
+            nn.BatchNorm1d(1024, momentum=0.1),
+            nn.Conv1d(1024, out_features, 1, 1, padding=0, bias=True))
+
+        self.layers = layers
+
+    def forward(self, x):
+        x = torch.transpose(x, 1, 2)
+        x = self.layers(x)
+        return torch.transpose(x, 1, 2)
+
+
 class rotation_D(base_model):
     def __init__(self, in_features, out_features, channel, joint_numbers):
         super(rotation_D, self).__init__()

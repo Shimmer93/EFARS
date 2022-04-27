@@ -12,7 +12,7 @@ class h36m_dataset(Dataset):
     def __init__(self, config, is_train=True):
         poses_3d, poses_2d, poses_2d_pixel, bones, alphas, contacts, proj_facters = [], [], [], [], [], [], []
         self.cameras = h36m_utils.load_cameras('./data/cameras.h5')
-
+        cam_para = []
         self.frame_numbers = []
         self.video_name = []
         self.config = config
@@ -33,6 +33,8 @@ class h36m_dataset(Dataset):
                 for c_idx, set_3d in enumerate(action_sequences):
                     set_3d = set_3d.copy().reshape((set_3d.shape[0], -1))
                     R, T, f, c, k, p, res_w, res_h = self.cameras[(subject, c_idx)]
+                    for i in range(set_3d.shape[0]):
+                      cam_para.append(np.concatenate((R.flatten(), T.flatten(),f.flatten(),c.flatten(),k.flatten(),p.flatten())))
                     set_3d_world = h36m_utils.camera_to_world_frame(set_3d.reshape((-1, 3)), R, T).reshape(set_3d.shape)
                     augment_depth = random.randint(-5, 20) if config.trainer.data_aug_depth else 0
                     if config.trainer.data == 'gt':
@@ -60,7 +62,6 @@ class h36m_dataset(Dataset):
                     alphas.append(set_alphas)
                     contacts.append(self.get_contacts(set_3d_world))
                     proj_facters.append((set_3d / np.expand_dims(set_alphas, axis=-1)).reshape((set_3d.shape[0], -1, 3))[:, 0, 2])
-
         self.poses_3d = np.concatenate(poses_3d, axis=0)
         self.poses_2d = np.concatenate(poses_2d, axis=0)
         self.poses_2d_pixel = np.concatenate(poses_2d_pixel, axis=0)
@@ -68,6 +69,8 @@ class h36m_dataset(Dataset):
         self.contacts = np.concatenate(contacts, axis=0)
         self.alphas = np.concatenate(alphas, axis=0)
         self.bones = np.concatenate(bones, axis=0)
+        self.cam_para = np.array(cam_para)
+        
 
         if is_train:
             if config.trainer.data_aug_flip:
@@ -91,7 +94,6 @@ class h36m_dataset(Dataset):
                 self.poses_2d_noised_with_confidence[:, 3 * joint_index + 2] = (confidence_maps[:, 2 * joint_index] + confidence_maps[:, 2 * joint_index]) / 2
 
         self.set_sequences()
-        
         self.poses_2d, self.poses_2d_mean, self.poses_2d_std = util.normalize_data(self.poses_2d_noised_with_confidence if config.arch.confidence else self.poses_2d) 
         self.bones, self.bones_mean, self.bones_std = util.normalize_data(self.bones) 
         self.proj_facters, self.proj_mean, self.proj_std = util.normalize_data(self.proj_facters)
@@ -106,13 +108,9 @@ class h36m_dataset(Dataset):
         contacts = self.contacts[items_index]
         alphas = self.alphas[items_index]
         proj_facters = -self.proj_facters[items_index] if random_flip else self.proj_facters[items_index]
-        
+        cam_para = np.array(self.cam_para[items_index])
         if self.is_train:
-            if self.config.trainer.use_loss_D:            
-                rotations = self.rotations[self.r_sequence_index[np.array(index) % self.r_sequence_index.shape[0]]]
-                return poses_2d, posed_3d, bones, contacts, alphas, proj_facters, rotations
-            else:
-                return poses_2d, posed_3d, bones, contacts, alphas, proj_facters
+            return poses_2d, posed_3d, bones, contacts, alphas, proj_facters, cam_para
         else:
             return poses_2d_pixel, poses_2d, posed_3d, bones, contacts, alphas, proj_facters, self.video_name[index]
 

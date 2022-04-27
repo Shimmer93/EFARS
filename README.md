@@ -29,3 +29,5 @@ cd classifier
 ```
 
 Detailed explanations of the command line arguments can be found in `utils/parser`
+
+For pose normalization, please `cd normalizer/ConSkeleton_Norm` and train the model with the default config file. 
